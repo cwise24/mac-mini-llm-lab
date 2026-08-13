@@ -1,0 +1,74 @@
+# LiteLLM: the pragmatist's AI gateway.
+#
+# Chosen when GATEWAY=litellm. Strength is breadth -- one config block maps a
+# model alias to essentially any provider, local or hosted, with fallbacks and
+# per-key budgets. Weakness for this lab: it does its own routing, so an
+# InferencePool/EPP in front of it is redundant and the llm-d scheduling signal
+# is lost. Use it when you care about provider abstraction, not scheduling.
+#
+# Chart lives at helm/litellm-helm in the BerriAI/litellm repo. There is no
+# public classic repo and no OCI package, so it is installed from git source.
+replicaCount: 1
+
+image:
+  repository: ghcr.io/berriai/litellm
+  tag: main-stable
+  pullPolicy: IfNotPresent
+
+resources:
+  requests: { cpu: 100m, memory: 256Mi }
+  # 768Mi is not enough. LiteLLM imports a very large provider surface at boot
+  # and gets OOMKilled (exit 137) ~10s in, BEFORE it writes a single log line --
+  # so the only visible symptom is a startup probe failing on connection refused
+  # with empty `kubectl logs`, which reads like a config error rather than RAM.
+  # This is a limit, not a reservation, so it costs nothing until used.
+  limits:   { memory: 2Gi }
+
+service:
+  type: ClusterIP
+  # Chart default is 4000. Normalised to 8080 because every gateway overlay must
+  # answer on the same port for the NGF HTTPRoute to be gateway-agnostic.
+  port: 8080
+
+# No database. The Postgres subchart alone costs ~300 MB and this lab needs
+# neither key management nor persisted spend tracking.
+db:
+  useExisting: false
+  deployStandalone: false
+
+postgresql:
+  enabled: false
+redis:
+  enabled: false
+
+migrationJob:
+  enabled: false
+
+masterkey: sk-llm-lab-local
+
+proxy_config:
+  model_list:
+    - model_name: __VLLM_SERVED_NAME__
+      litellm_params:
+        model: hosted_vllm/__VLLM_SERVED_NAME__
+        api_base: http://vllm-cpu.llm-serving.svc.cluster.local:8000/v1
+        api_key: none
+    - model_name: __HOST_ENGINE_MODEL__
+      litellm_params:
+        model: openai/__HOST_ENGINE_MODEL__
+        api_base: http://host-bridge.llm-serving.svc.cluster.local:8000/v1
+        api_key: none
+    # Demonstrates fallback: try the slow local model, fall back to Metal
+    - model_name: auto
+      litellm_params:
+        model: hosted_vllm/__VLLM_SERVED_NAME__
+        api_base: http://vllm-cpu.llm-serving.svc.cluster.local:8000/v1
+        api_key: none
+
+  litellm_settings:
+    drop_params: true
+    request_timeout: 600
+    fallbacks: [{ "auto": ["__HOST_ENGINE_MODEL__"] }]
+
+  general_settings:
+    master_key: sk-llm-lab-local

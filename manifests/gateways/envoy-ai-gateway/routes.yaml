@@ -1,0 +1,234 @@
+# Envoy AI Gateway: the model-aware tier behind NGF.
+#
+# Chosen when GATEWAY=envoy. Distinctive capability vs the other two: it speaks
+# Gateway API natively and can consume an InferencePool as a backend, so the
+# llm-d Endpoint Picker stays in the request path. LiteLLM and Bifrost cannot do
+# this -- they load-balance with their own logic and the EPP is bypassed.
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: envoy-ai
+spec:
+  controllerName: gateway.envoyproxy.io/gatewayclass-controller
+  parametersRef:
+    group: gateway.envoyproxy.io
+    kind: EnvoyProxy
+    name: ai-gateway-proxy
+    namespace: llm-gateway
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyProxy
+metadata:
+  name: ai-gateway-proxy
+  namespace: llm-gateway
+spec:
+  provider:
+    type: Kubernetes
+    kubernetes:
+      envoyDeployment:
+        replicas: 1
+        container:
+          resources:
+            requests: { cpu: 50m, memory: 96Mi }
+            limits:   { memory: 384Mi }
+      envoyService:
+        type: ClusterIP
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: envoy-ai-gateway
+  namespace: llm-gateway
+spec:
+  gatewayClassName: envoy-ai
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 8080
+      allowedRoutes:
+        namespaces: { from: All }
+---
+# Model-name based routing. This is the interesting bit: one OpenAI-compatible
+# endpoint, several physically different backends, selected by the `model` field
+# in the request body rather than by URL path.
+#
+# NOTE THE NAMESPACE: llm-serving, not llm-gateway with everything else.
+#
+# The AI Gateway controller does not honour a cross-namespace InferencePool. Give
+# it `namespace: llm-serving` on the backendRef and it still emits the generated
+# HTTPRoute with the ROUTE's own namespace, producing
+#   ResolvedRefs=False BackendNotFound
+#   "custom backend InferencePool llm-gateway/primary-pool not found"
+# and a bare 500 on every request. The InferencePool cannot move to meet it --
+# its selector only matches pods in its own namespace, and the model servers live
+# in llm-serving. So the route (and the AIServiceBackends/Backends it uses) sit
+# with the pool instead. The parentRef stays cross-namespace, which is fine:
+# attachment is governed by the Gateway's allowedRoutes (from: All above), not by
+# ReferenceGrant.
+apiVersion: aigateway.envoyproxy.io/v1beta1
+kind: AIGatewayRoute
+metadata:
+  name: model-router
+  namespace: llm-serving
+spec:
+  parentRefs:
+    - name: envoy-ai-gateway
+      namespace: llm-gateway
+      kind: Gateway
+      group: gateway.networking.k8s.io
+  rules:
+    # In-cluster vLLM on CPU, genuinely fronted by the llm-d Endpoint Picker.
+    #
+    # This backendRef names the InferencePool rather than a Service, and that
+    # distinction is the entire reason GATEWAY=envoy exists in this lab. With a
+    # Service ref, Envoy load-balances across EndpointSlice members round-robin
+    # and the EPP is never consulted -- the llm-d scheduling plane is installed
+    # but inert. With the InferencePool ref, Envoy calls the pool's endpointPicker
+    # over ext_proc for every request and routes to the pod the EPP names, scoring
+    # on live KV-cache utilisation and queue depth. LiteLLM and Bifrost cannot do
+    # this at all; that is the comparison the lab is set up to make.
+    #
+    # Constraints from the v1.0.0 API (api/v1alpha1/ai_gateway_route.go):
+    #   - group and kind must be given together
+    #   - group must be inference.networking.k8s.io, kind InferencePool
+    #   - at most one InferencePool per rule, and it cannot be mixed with
+    #     AIServiceBackend refs in the same rule
+    #   - weight/modelNameOverride/headerMutation are ignored for pool refs,
+    #     so they are omitted rather than written and silently dropped
+    #   - no `namespace:` here on purpose; see the note on metadata above. It
+    #     would be ignored anyway, and stating it implies a portability that
+    #     does not exist.
+    - matches:
+        - headers:
+            - type: Exact
+              name: x-ai-eg-model
+              value: __VLLM_SERVED_NAME__
+      backendRefs:
+        - name: primary-pool
+          group: inference.networking.k8s.io
+          kind: InferencePool
+      # AI Gateway injects request: 60s when this is unset (its own override of
+      # Envoy Gateway's 15s). CPU generation blows straight through that, and the
+      # failure is a 504 from a timeout nobody wrote down. Match the 600s used at
+      # every other tier -- upstream explicitly recommends raising it for
+      # stream=true responses.
+      timeouts:
+        request: 600s
+    # Host-side Metal engine: the fast path
+    - matches:
+        - headers:
+            - type: Exact
+              name: x-ai-eg-model
+              value: __HOST_ENGINE_MODEL__
+      backendRefs:
+        - name: host-metal-backend
+          weight: 100
+      timeouts:
+        request: 600s
+---
+# AIServiceBackend can no longer point at a Service.
+#
+# As of Envoy AI Gateway v1.0.0 the CRD rejects a core Service backendRef:
+#   spec.backendRef: BackendRef must be a Backend resource of Envoy Gateway
+#   (see https://github.com/envoyproxy/ai-gateway/issues/902)
+# so each upstream is now declared as a gateway.envoyproxy.io Backend and the
+# AIServiceBackend refers to that. An FQDN endpoint is used rather than an IP so
+# the target is still resolved through cluster DNS and survives a Service re-IP.
+# These live in llm-serving alongside the route that references them, for the
+# namespace reason explained above.
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: Backend
+metadata:
+  name: vllm-cpu-be
+  namespace: llm-serving
+spec:
+  endpoints:
+    - fqdn:
+        hostname: vllm-cpu.llm-serving.svc.cluster.local
+        port: 8000
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: Backend
+metadata:
+  name: host-metal-be
+  namespace: llm-serving
+spec:
+  endpoints:
+    - fqdn:
+        hostname: host-bridge.llm-serving.svc.cluster.local
+        port: 8000
+---
+# Kept, deliberately unreferenced: the EPP-bypass comparison path.
+#
+# Point the vLLM rule above at this instead of primary-pool to send traffic
+# straight to the Service, and the difference in `make logs-epp` (decisions vs
+# silence) is the clearest demonstration of what the scheduling layer does.
+apiVersion: aigateway.envoyproxy.io/v1beta1
+kind: AIServiceBackend
+metadata:
+  name: vllm-cpu-backend
+  namespace: llm-serving
+spec:
+  schema: { name: OpenAI }
+  backendRef:
+    group: gateway.envoyproxy.io
+    kind: Backend
+    name: vllm-cpu-be
+---
+apiVersion: aigateway.envoyproxy.io/v1beta1
+kind: AIServiceBackend
+metadata:
+  name: host-metal-backend
+  namespace: llm-serving
+spec:
+  schema: { name: OpenAI }
+  backendRef:
+    group: gateway.envoyproxy.io
+    kind: Backend
+    name: host-metal-be
+---
+# Cross-namespace consent -- currently belt-and-braces, deliberately kept.
+#
+# Now that the route, its Backends and the InferencePool all sit in llm-serving,
+# nothing here is strictly required: Gateway API only demands a ReferenceGrant
+# for cross-namespace BACKEND refs, and the one remaining cross-namespace link is
+# the parentRef to the Gateway, which is governed by allowedRoutes instead.
+#
+# They stay because the co-location above is a workaround for a controller
+# limitation, not a design choice. The moment that is fixed upstream and these
+# resources move back to llm-gateway where they belong, the grants are exactly
+# what is needed -- and their absence fails quietly, as ResolvedRefs=False buried
+# in route status rather than anything you would notice at install time.
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: allow-llm-gateway-to-inferencepool
+  namespace: llm-serving
+spec:
+  from:
+    - group: aigateway.envoyproxy.io
+      kind: AIGatewayRoute
+      namespace: llm-gateway
+  to:
+    - group: inference.networking.k8s.io
+      kind: InferencePool
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: allow-llm-gateway-to-services
+  namespace: llm-serving
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: llm-gateway
+    - group: aigateway.envoyproxy.io
+      kind: AIServiceBackend
+      namespace: llm-gateway
+  to:
+    - group: ""
+      kind: Service
+
+# The `ai-gateway` Service is created by scripts/gateway.sh, which discovers the
+# hash-suffixed Envoy data-plane Service by owner label. See publish_ai_gateway().

@@ -1,0 +1,57 @@
+# Kind topology for a single Apple Silicon Mac mini.
+#
+# Design notes:
+#  - Single node. Extra workers cost ~600 MB each in kubelet/containerd overhead
+#    and buy nothing here: there is one physical machine and no real topology to
+#    spread across. Node labels below let you *simulate* pools on the one node.
+#  - extraPortMappings is the ONLY reliable ingress path on macOS. Docker Desktop
+#    does not route the host to the `kind` bridge network, so LoadBalancer IPs
+#    from MetalLB are unreachable from the Mac. Do not add MetalLB here.
+#  - The registry patch lets us push a locally-built vLLM CPU image once and have
+#    every pod pull it without re-pulling over the network.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: llm-lab
+
+nodes:
+  - role: control-plane
+    # All node labels MUST live in this one place.
+    #
+    # kind implements the `labels:` field by generating a --node-labels kubelet
+    # arg. Supplying your own kubeadmConfigPatch with node-labels REPLACES that
+    # generated value rather than merging with it, so `labels:` is silently
+    # dropped and pods with a matching nodeSelector sit Pending forever with
+    # "node(s) didn't match Pod's node affinity/selector".
+    #
+    # Keeping everything in one comma-separated list makes the collision
+    # impossible. scripts/up.sh re-applies these post-create as a belt-and-braces
+    # guarantee, since this behaviour is a kind implementation detail.
+    kubeadmConfigPatches:
+      - |
+        kind: InitConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "ingress-ready=true,llm-lab.io/pool=inference,llm-lab.io/accelerator=none"
+    extraPortMappings:
+      # Active gateway (NodePort 30080) -> http://localhost:8080
+      - containerPort: 30080
+        hostPort: 8080
+        protocol: TCP
+      # Direct backend access, bypassing the gateway, for A/B comparison
+      - containerPort: 30081
+        hostPort: 8081
+        protocol: TCP
+      # Prometheus (full profile only)
+      - containerPort: 30090
+        hostPort: 9090
+        protocol: TCP
+
+containerdConfigPatches:
+  - |-
+    [plugins."io.containerd.grpc.v1.cri".registry]
+      config_path = "/etc/containerd/certs.d"
+
+networking:
+  apiServerAddress: "127.0.0.1"
+  # kube-proxy in iptables mode; ipvs adds modules Docker Desktop's VM may lack
+  kubeProxyMode: "iptables"

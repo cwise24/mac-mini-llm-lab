@@ -1,0 +1,83 @@
+# Envoy Gateway, configured for Envoy AI Gateway and trimmed for one small machine.
+#
+# The resource limits are the lab-specific part -- the defaults assume a real
+# cluster and will happily eat 1 GB+ of the VM. Everything else here is REQUIRED
+# integration config, mirroring upstream's manifests/envoy-gateway-values.yaml
+# plus examples/inference-pool/envoy-gateway-values-addon.yaml at v1.0.0. Envoy
+# AI Gateway is not a plugin that Envoy Gateway discovers; it is an extension
+# server that Envoy Gateway must be explicitly pointed at, and none of it is
+# defaulted.
+#
+# Omit it and everything still *installs* cleanly -- CRDs apply, the Gateway goes
+# Programmed, AIGatewayRoute reports "reconciled successfully" -- and then every
+# request returns the AI Gateway catch-all:
+#   "No matching route found. It is likely because the model specified in your
+#    request is not configured in the Gateway."
+# which points suspicion at your model names rather than at missing plumbing.
+deployment:
+  replicas: 1
+  envoyGateway:
+    resources:
+      requests: { cpu: 50m, memory: 96Mi }
+      limits:   { memory: 384Mi }
+
+config:
+  envoyGateway:
+    gateway:
+      controllerName: gateway.envoyproxy.io/gatewayclass-controller
+    provider:
+      type: Kubernetes
+      kubernetes:
+        envoyDeployment:
+          replicas: 1
+          container:
+            resources:
+              requests: { cpu: 50m, memory: 96Mi }
+              limits:   { memory: 384Mi }
+    logging:
+      level: { default: warn }
+
+    extensionApis:
+      # Required. AIServiceBackend must reference a gateway.envoyproxy.io Backend
+      # (a core Service backendRef is rejected outright as of AI Gateway v1.0.0 --
+      # see https://github.com/envoyproxy/ai-gateway/issues/902), and Envoy Gateway
+      # only reconciles Backend resources when this is on.
+      enableBackend: true
+      # Recommended upstream for backward/future compatibility.
+      enableEnvoyPatchPolicy: true
+
+    extensionManager:
+      # THE setting that makes GATEWAY=envoy meaningful in this lab.
+      #
+      # Envoy Gateway's validateBackendRef() hardcodes an allowlist -- Service,
+      # ServiceImport, Backend -- and rejects anything else with
+      #   invalid group; must be nil, empty string "multicluster.x-k8s.io" or
+      #   "gateway.envoyproxy.io"
+      # which is logged only by the envoy-gateway controller and never surfaced
+      # on the route's status. Registering InferencePool here declares it an
+      # extension-owned backend, so the reference resolves and the llm-d Endpoint
+      # Picker genuinely lands in the request path instead of the rule being
+      # silently dropped and every request falling through to the catch-all.
+      backendResources:
+        - group: inference.networking.k8s.io
+          kind: InferencePool
+          version: v1
+
+      # AI Gateway rewrites the xDS that Envoy Gateway generates -- that is how
+      # model-aware routing works at all -- so the translator hooks must be opened
+      # up and the AI Gateway controller registered as the extension server.
+      hooks:
+        xdsTranslator:
+          translation:
+            listener: { includeAll: true }
+            route:    { includeAll: true }
+            cluster:  { includeAll: true }
+            secret:   { includeAll: true }
+          post:
+            - Translation
+            - Cluster
+            - Route
+      service:
+        fqdn:
+          hostname: ai-gateway-controller.envoy-ai-gateway-system.svc.cluster.local
+          port: 1063

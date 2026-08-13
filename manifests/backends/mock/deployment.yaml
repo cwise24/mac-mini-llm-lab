@@ -1,0 +1,141 @@
+# Zero-latency fake OpenAI backend. Used by PROFILE=lite and by gateway-only
+# iteration, where waiting 90s for a CPU model to answer destroys the feedback loop.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mock-backend-app
+  namespace: llm-serving
+data:
+  app.py: |
+    import json, time, uuid
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    MODELS = ["mock-fast", "mock-slow"]
+
+    class H(BaseHTTPRequestHandler):
+        def _send(self, code, body, ctype="application/json"):
+            raw = body.encode() if isinstance(body, str) else body
+            self.send_response(code)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            if self.path in ("/health", "/healthz"):
+                return self._send(200, "ok", "text/plain")
+            if self.path == "/metrics":
+                # These five names are not decorative -- they are exactly what the
+                # GIE v1.5.0 core-metrics-extractor reads (see factories.go,
+                # vLLMEngineConfig). Emit fewer and the EPP logs "extract failed:
+                # metric family ... not found" for this endpoint on every scrape
+                # and scores it on partial data.
+                #
+                # Two shapes are non-obvious:
+                #   lora_requests_info  -- the VALUE is a creation timestamp, not a
+                #     count. Each label permutation is its own series and the EPP
+                #     picks whichever has the highest value, so a fixed 1.0 is fine
+                #     for a mock with one static adapter set.
+                #   cache_config_info   -- carries its payload in LABELS
+                #     (block_size, num_gpu_blocks); the value itself is ignored.
+                #
+                # Note kv_cache_usage_perc, NOT gpu_cache_usage_perc: vLLM renamed
+                # it and GIE followed. The old name silently reads as "missing".
+                return self._send(200,
+                    'vllm:num_requests_running{model_name="mock-fast"} 0\n'
+                    'vllm:num_requests_waiting{model_name="mock-fast"} 0\n'
+                    'vllm:kv_cache_usage_perc{model_name="mock-fast"} 0.1\n'
+                    'vllm:lora_requests_info{running_lora_adapters="",'
+                    'waiting_lora_adapters="",max_lora="1"} 1.0\n'
+                    'vllm:cache_config_info{block_size="16",num_gpu_blocks="1024"} 1\n',
+                    "text/plain")
+            if self.path == "/v1/models":
+                return self._send(200, json.dumps({
+                    "object": "list",
+                    "data": [{"id": m, "object": "model", "owned_by": "mock"} for m in MODELS]
+                }))
+            self._send(404, json.dumps({"error": "not found"}))
+
+        def do_POST(self):
+            n = int(self.headers.get("Content-Length", 0))
+            req = json.loads(self.rfile.read(n) or b"{}")
+            model = req.get("model", "mock-fast")
+            if model == "mock-slow":
+                time.sleep(2)
+            text = f"[mock reply from {model}]"
+            if self.path.endswith("/chat/completions"):
+                payload = {"id": f"chatcmpl-{uuid.uuid4().hex[:12]}", "object": "chat.completion",
+                           "created": int(time.time()), "model": model,
+                           "choices": [{"index": 0, "finish_reason": "stop",
+                                        "message": {"role": "assistant", "content": text}}],
+                           "usage": {"prompt_tokens": 8, "completion_tokens": 6, "total_tokens": 14}}
+            else:
+                payload = {"id": f"cmpl-{uuid.uuid4().hex[:12]}", "object": "text_completion",
+                           "created": int(time.time()), "model": model,
+                           "choices": [{"index": 0, "text": text, "finish_reason": "stop"}],
+                           "usage": {"prompt_tokens": 8, "completion_tokens": 6, "total_tokens": 14}}
+            self._send(200, json.dumps(payload))
+
+    HTTPServer(("0.0.0.0", 8000), H).serve_forever()
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mock-backend
+  namespace: llm-serving
+  labels: { app: mock-backend, llm-lab.io/backend: mock }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: mock-backend }
+  template:
+    metadata:
+      labels:
+        app: mock-backend
+        llm-lab.io/backend: mock
+        # Deliberately NOT llm-lab.io/inference-pool: primary.
+        #
+        # primary-pool selects on that label, and the EPP does not know or care
+        # which models an endpoint actually serves -- it scores on queue depth and
+        # KV-cache usage. Put the mocks in the same pool as real vLLM and an
+        # always-idle mock outscores a loaded model server every time, so a
+        # request for the real model comes back "[mock reply from mock-fast]" and
+        # streaming breaks (the mock answers plain JSON, never SSE). It looks
+        # exactly like the gateway routing to the wrong backend, which it is --
+        # just for a legitimate scheduling reason.
+        #
+        # The pool only exists under PROFILE=full, which always includes real
+        # vLLM, so nothing is lost by keeping the mocks out of it. They stay
+        # directly addressable via Service/mock-backend for gateway-only work.
+        llm-lab.io/inference-pool: mock
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+    spec:
+      containers:
+        - name: mock
+          image: python:3.12-alpine
+          command: ["python", "/app/app.py"]
+          ports: [{ name: http, containerPort: 8000 }]
+          volumeMounts: [{ name: app, mountPath: /app }]
+          resources:
+            requests: { cpu: 25m, memory: 32Mi }
+            limits:   { memory: 128Mi }
+          readinessProbe:
+            httpGet: { path: /health, port: 8000 }
+            initialDelaySeconds: 2
+      volumes:
+        - name: app
+          configMap: { name: mock-backend-app }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mock-backend
+  namespace: llm-serving
+spec:
+  selector: { app: mock-backend }
+  ports: [{ name: http, port: 8000, targetPort: 8000 }]

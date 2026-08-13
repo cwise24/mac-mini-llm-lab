@@ -1,0 +1,151 @@
+# The llm-d scheduling plane, minus the GPU-only parts.
+#
+# WHAT IS REAL HERE:
+#   InferencePool + Endpoint Picker (EPP) is the Gateway API Inference Extension --
+#   the same component llm-d ships as llm-d-inference-scheduler. The gateway asks
+#   the EPP "which pod should serve this request?" over Envoy ext_proc, and the EPP
+#   answers using live vLLM metrics: KV-cache utilisation, queue depth, prefix-cache
+#   locality. This is the substantive part of llm-d and it runs fine on arm64 CPU.
+#
+# WHAT IS NOT HERE:
+#   Prefill/decode disaggregation and NIXL KV-cache transfer. Those need multiple
+#   GPUs and high-speed interconnect. On this hardware they would be theatre.
+#   See docs/HomeLab_Architecture_v1.md for the migration path.
+apiVersion: inference.networking.k8s.io/v1
+kind: InferencePool
+metadata:
+  name: primary-pool
+  namespace: llm-serving
+spec:
+  selector:
+    matchLabels:
+      llm-lab.io/inference-pool: primary
+  targetPorts:
+    - number: 8000
+  endpointPickerRef:
+    name: primary-pool-epp
+    port:
+      number: 9002
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: primary-pool-epp
+  namespace: llm-serving
+  labels: { app: primary-pool-epp }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: primary-pool-epp }
+  template:
+    metadata:
+      labels: { app: primary-pool-epp }
+    spec:
+      serviceAccountName: primary-pool-epp
+      containers:
+        - name: epp
+          image: EPP_IMAGE_PLACEHOLDER
+          imagePullPolicy: IfNotPresent
+          args:
+            - --pool-name=primary-pool
+            - --pool-namespace=llm-serving
+            - --grpc-port=9002
+            - --grpc-health-port=9003
+            - --metrics-port=9090
+            - -v=3
+          # EXPECTED LOG NOISE, do not chase it:
+          #   extract failed ... metric family "vllm:lora_requests_info" not found
+          #
+          # vLLM only registers that metric when LoRA is enabled, and this lab
+          # serves one base model with no adapters, so the real vLLM endpoint can
+          # never satisfy it. It is harmless: in GIE's extractor the other specs
+          # still set updated=true, so metrics commit and UpdateTime refreshes --
+          # the endpoint never goes stale and routing is unaffected.
+          #
+          # There is deliberately no flag here to silence it. --lora-info-metric
+          # exists but v1.5.0 hard-REJECTS it ("flag is deprecated and cannot be
+          # used"), so passing it crashloops the EPP. The supported route is a
+          # full EndpointPickerConfig via --config-text, which means restating
+          # the whole plugin/scheduler config to mute one log line. Not worth it.
+          ports:
+            - { name: grpc,        containerPort: 9002 }
+            - { name: grpc-health, containerPort: 9003 }
+            - { name: metrics,     containerPort: 9090 }
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits:   { memory: 256Mi }
+          livenessProbe:
+            grpc: { port: 9003, service: inference-extension }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            grpc: { port: 9003, service: inference-extension }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: primary-pool-epp
+  namespace: llm-serving
+spec:
+  selector: { app: primary-pool-epp }
+  # ext_proc is HTTP/2; without this appProtocol Envoy will downgrade and fail
+  ports:
+    - { name: grpc,    port: 9002, targetPort: 9002, appProtocol: http2 }
+    - { name: metrics, port: 9090, targetPort: 9090 }
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: primary-pool-epp
+  namespace: llm-serving
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: primary-pool-epp
+rules:
+  # InferencePool graduated to inference.networking.k8s.io/v1, but the newer
+  # types the EPP also watches (InferenceObjective, InferencePoolImport,
+  # InferenceModelRewrite) are still alpha and live under the x-k8s.io group --
+  # GIE v1.5.0 ships them as four CRDs across TWO api groups. Granting only the
+  # stable group leaves the EPP logging repeated "cannot list" errors and
+  # scoring with incomplete state, rather than failing outright.
+  - apiGroups: ["inference.networking.k8s.io"]
+    resources: ["inferencepools"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["inference.networking.k8s.io"]
+    resources: ["inferencepools/status"]
+    verbs: ["get", "patch", "update"]
+  - apiGroups: ["inference.networking.x-k8s.io"]
+    resources: ["inferenceobjectives", "inferencepoolimports", "inferencemodelrewrites"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["inference.networking.x-k8s.io"]
+    resources: ["inferenceobjectives/status", "inferencepoolimports/status"]
+    verbs: ["get", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["pods", "services", "endpoints"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["authentication.k8s.io"]
+    resources: ["tokenreviews"]
+    verbs: ["create"]
+  - apiGroups: ["authorization.k8s.io"]
+    resources: ["subjectaccessreviews"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: primary-pool-epp
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: primary-pool-epp
+subjects:
+  - kind: ServiceAccount
+    name: primary-pool-epp
+    namespace: llm-serving

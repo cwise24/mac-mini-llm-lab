@@ -1,0 +1,7 @@
+# SUPERSEDED -- intentionally empty, kept so nothing dangles.
+#
+# The `ai-gateway` Service is no longer declared statically. Helm fullname
+# templates differ by release name and chart name, so a hardcoded externalName
+# was a guess. scripts/gateway.sh now discovers the real Service by the label
+# app.kubernetes.io/instance=litellm and creates the alias from what it finds.
+# See publish_ai_gateway() in scripts/lib.sh.

@@ -1,0 +1,110 @@
+# NGINX Gateway Fabric: the north-south ingress tier.
+#
+# Layering rationale -- NGF and the "AI gateway" are different jobs and it is worth
+# keeping them apart:
+#   NGF        -> Gateway API conformance, TLS, host/path routing, rate limits.
+#                 Cares about HTTP. Knows nothing about tokens or models.
+#   AI gateway -> model name routing, provider translation, token accounting,
+#                 fallback across providers. Cares about the OpenAI schema.
+#
+# Because every AI gateway overlay publishes the same Service name, the HTTPRoute
+# below never changes when you swap Envoy AI Gateway for LiteLLM or Bifrost.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: llm-ingress
+  namespace: llm-gateway
+spec:
+  gatewayClassName: nginx
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchExpressions:
+              - key: llm-lab.io/tier
+                operator: In
+                values: ["gateway", "serving"]
+---
+# NOTE: the NodePort Service that maps this Gateway to localhost:8080 is NOT
+# declared here. NGF 2.x provisions its data plane per-Gateway and the pod labels
+# it selects on are an implementation detail that has changed between releases.
+# scripts/ingress-nodeport.sh reads the selector off the Service NGF actually
+# created and clones it onto a fixed NodePort. A hardcoded selector here would
+# produce a Service with zero endpoints and look like a networking fault.
+
+---
+# The one route to rule them all. Target is the contract every overlay satisfies.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: ai-gateway-route
+  namespace: llm-gateway
+spec:
+  parentRefs:
+    - name: llm-ingress
+  rules:
+    # Inference traffic.
+    - matches:
+        - path: { type: PathPrefix, value: /v1 }
+      backendRefs:
+        - name: ai-gateway
+          port: 8080
+
+    # Everything else: admin UIs, health, metrics, static assets.
+    #
+    # LiteLLM serves its dashboard at /ui and Bifrost at /, each pulling JS/CSS
+    # and its own API from paths that are not enumerable in advance -- hence a
+    # catch-all rather than a list of prefixes. Envoy AI Gateway has no UI, so
+    # under GATEWAY=envoy this rule just returns whatever Envoy says for a
+    # non-/v1 path.
+    #
+    # Gateway API matches the MOST SPECIFIC path first regardless of rule order,
+    # so /v1 above still wins for inference.
+    #
+    # No `timeouts:` here for the reason documented below -- NGF forbids them on
+    # HTTPRoute rules. The ProxySettingsPolicy targets the Gateway, so these
+    # requests inherit the same 600s read/send and disabled buffering.
+    - matches:
+        - path: { type: PathPrefix, value: / }
+      backendRefs:
+        - name: ai-gateway
+          port: 8080
+# NOTE: no `timeouts:` on the rule above. NGF FORBIDS HTTPRoute rule timeouts --
+# unconditionally, not behind a feature flag (validateHTTPRouteRule() rejects
+# rule.Timeouts outright). Setting them does not fail the apply; the route is
+# still Accepted, with the refusal tucked into a condition message:
+#   Accepted True UnsupportedField
+#   "unsupported parameters were ignored: spec.rules[0].timeouts: Forbidden"
+# so the timeouts read as configured while nginx quietly uses its 60s default and
+# long generations die at exactly 60s. The ProxySettingsPolicy below is NGF's
+# actual mechanism, and it applies to every route through the Gateway.
+---
+apiVersion: gateway.nginx.org/v1alpha1
+kind: ProxySettingsPolicy
+metadata:
+  name: llm-ingress-proxy-settings
+  namespace: llm-gateway
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: llm-ingress
+  timeout:
+    # CPU generation is slow by design here; 600s matches the AI gateway tier and
+    # the host bridge so no single hop is the odd one out.
+    read: 600s
+    send: 600s
+    connect: 60s
+  buffering:
+    # The other half of working SSE.
+    #
+    # docs/HomeLab_Architecture_v1.md calls out proxy_buffering on the host bridge
+    # as the classic streaming killer -- but NGF buffers too, and this is the only
+    # place to turn that off for the ingress tier. With buffering on, token deltas
+    # pool in nginx and the client gets one large response at the end: the request
+    # still succeeds, so nothing looks broken, it just is not streaming.
+    disable: true

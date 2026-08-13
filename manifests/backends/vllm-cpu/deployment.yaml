@@ -1,0 +1,186 @@
+# Real vLLM, CPU backend, arm64. Small model on purpose.
+#
+# The point of this deployment is NOT throughput -- it will be slow. The point is
+# that it emits genuine vLLM Prometheus metrics (kv cache utilisation, running/
+# waiting queue depth, LoRA state). Those metrics are exactly what the Endpoint
+# Picker scores on, so the scheduling layer above it is exercised for real.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm-cpu
+  namespace: llm-serving
+  labels:
+    app: vllm-cpu
+    llm-lab.io/backend: vllm-cpu
+    llm-lab.io/inference-pool: primary
+spec:
+  # Baseline only -- backends.sh immediately scales this to VLLM_REPLICAS. Kept
+  # at 1 rather than 2 so a bare `kubectl apply` of this file cannot overcommit
+  # the node: each replica requests 3Gi against ~9.7Gi allocatable.
+  replicas: 1
+  # Recreate, not RollingUpdate.
+  #
+  # A rolling update starts the replacement pod before retiring the old one, so
+  # for a window there are two vLLM processes on a node with ~9.7Gi allocatable
+  # and a 6Gi limit each. That does not fit, and the way it fails is confusing:
+  # the NEW pod gets OOMKilled (exit 137) partway through model load, so every
+  # `make backends` after the first looks like a fresh vLLM bug rather than
+  # simple overcommit. With one replica there is nothing to roll anyway.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: { app: vllm-cpu }
+  template:
+    metadata:
+      labels:
+        app: vllm-cpu
+        llm-lab.io/backend: vllm-cpu
+        llm-lab.io/inference-pool: primary
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+    spec:
+      nodeSelector:
+        llm-lab.io/pool: inference
+      # Spread replicas so the EPP has genuinely distinct endpoints to choose between
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: { app: vllm-cpu }
+      containers:
+        - name: vllm
+          image: VLLM_IMAGE_PLACEHOLDER
+          imagePullPolicy: IfNotPresent
+          # Explicit command, not just args.
+          #
+          # The official vllm-openai image ENTRYPOINTs to `vllm serve`, while
+          # community arm64 CPU builds use varying entrypoints or none at all.
+          # Passing bare --flags therefore breaks on some images and works on
+          # others. Invoking the API server module directly is portable across
+          # every image that has vllm installed, which is the only property we
+          # can actually rely on.
+          command: ["python3", "-m", "vllm.entrypoints.openai.api_server"]
+          args:
+            - --model=$(VLLM_MODEL)
+            - --served-model-name=$(VLLM_SERVED_NAME)
+            - --host=0.0.0.0
+            - --port=8000
+            # No --device flag. vLLM 0.26 removed --device as a platform
+            # selector -- the platform is auto-detected (this image resolves to
+            # CpuPlatform on its own). The remaining `--device-ids` takes integer
+            # GPU indices, and argparse prefix-matches `--device=cpu` onto it,
+            # so the old flag now fails deep in engine config with the very
+            # unhelpful "Non-integer device ID 'cpu' is not supported by cpu".
+            - --dtype=bfloat16
+            - --max-model-len=$(VLLM_MAX_MODEL_LEN)
+            # Single CPU "GPU-equivalent"; tensor parallelism on CPU costs more
+            # in cross-thread sync than it returns at this size.
+            - --tensor-parallel-size=1
+            # vLLM 0.26 replaced --disable-log-requests with a --no-enable-* pair.
+            - --no-enable-log-requests
+            # Small block size keeps the paged-attention allocator honest at low RAM
+            - --block-size=16
+            # --swap-space was removed in vLLM 0.26; CPU KV cache is sized by
+            # VLLM_CPU_KVCACHE_SPACE (set in env below) instead.
+            - --enforce-eager
+          env:
+            - { name: VLLM_MODEL,         valueFrom: { configMapKeyRef: { name: vllm-cpu-conf, key: model } } }
+            - { name: VLLM_SERVED_NAME,   valueFrom: { configMapKeyRef: { name: vllm-cpu-conf, key: servedName } } }
+            - { name: VLLM_MAX_MODEL_LEN, valueFrom: { configMapKeyRef: { name: vllm-cpu-conf, key: maxModelLen } } }
+            # Turn torch.compile into a no-op.
+            #
+            # --enforce-eager only covers vLLM's own model compilation; the V1
+            # sampler is separately decorated with @torch.compile, so startup
+            # still reaches TorchInductor's C++ codegen during the profile run.
+            # That codegen shells out to g++ against torch's bundled headers, and
+            # this community arm64 image ships torch WITHOUT its
+            # torch/include/torch/csrc/inductor tree at all -- verified: the
+            # directory does not exist. The build therefore dies on
+            #   fatal error: torch/csrc/inductor/cpp_prefix.h: No such file
+            # which surfaces only as "Engine core initialization failed".
+            #
+            # Disabling dynamo makes every @torch.compile fall through to eager,
+            # which is where we already are on CPU, so nothing is given up. This
+            # is a workaround for an image packaging defect, not a tuning choice:
+            # drop it if VLLM_UPSTREAM_IMAGE is changed to a complete build.
+            - { name: TORCHDYNAMO_DISABLE, value: "1" }
+            # KV cache lives in plain RAM on the CPU backend, and it is charged
+            # against the container limit below alongside weights and the torch
+            # runtime. 1GiB is ample for one sequence at --max-model-len=2048;
+            # 2GiB was enough to push total RSS past the limit and get the pod
+            # OOMKilled during startup.
+            - { name: VLLM_CPU_KVCACHE_SPACE, value: "1" }
+            # Pin to distinct cores; without this the replicas fight each other
+            - { name: VLLM_CPU_OMP_THREADS_BIND, value: "auto" }
+            - { name: OMP_NUM_THREADS, value: "2" }
+            - { name: HF_HOME, value: /cache/hf }
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef: { name: hf-token, key: token, optional: true }
+          ports:
+            - { name: http, containerPort: 8000 }
+          resources:
+            # Headroom matters more than tightness here: weights (~1Gi bf16) +
+            # 1Gi KV + the torch/python runtime lands close enough to 5Gi that
+            # startup was being OOMKilled. 6Gi still leaves room for the bridge,
+            # mocks, EPP and NGF within the node's ~9.7Gi, given Recreate above.
+            requests: { cpu: "2",   memory: 3Gi }
+            limits:   { cpu: "3",   memory: 6Gi }
+          volumeMounts:
+            - { name: hf-cache, mountPath: /cache/hf }
+            - { name: shm,      mountPath: /dev/shm }
+          startupProbe:
+            httpGet: { path: /health, port: 8000 }
+            # CPU model load is genuinely slow: allow 15 minutes before giving up
+            periodSeconds: 10
+            failureThreshold: 90
+          readinessProbe:
+            httpGet: { path: /health, port: 8000 }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /health, port: 8000 }
+            periodSeconds: 30
+            failureThreshold: 5
+      volumes:
+        # Shared across replicas so the model downloads once
+        - name: hf-cache
+          persistentVolumeClaim: { claimName: hf-cache }
+        - name: shm
+          emptyDir: { medium: Memory, sizeLimit: 1Gi }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: hf-cache
+  namespace: llm-serving
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests: { storage: 20Gi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-cpu
+  namespace: llm-serving
+  labels: { app: vllm-cpu }
+spec:
+  selector: { app: vllm-cpu }
+  ports:
+    - { name: http, port: 8000, targetPort: 8000 }
+---
+# Direct access on :8081, bypassing the gateway. Useful for isolating whether a
+# slow response is the model or the routing layer.
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-cpu-direct
+  namespace: llm-serving
+spec:
+  type: NodePort
+  selector: { app: vllm-cpu }
+  ports:
+    - { name: http, port: 8000, targetPort: 8000, nodePort: 30081 }
