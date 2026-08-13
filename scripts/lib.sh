@@ -33,16 +33,71 @@ load_env "${STATE_DIR}/vllm-image.env"
 load_env "${REPO_ROOT}/.env"
 load_env "${REPO_ROOT}/.env.example"
 
-: "${CONTAINER_CLI:=podman}"
-: "${HOST_INTERNAL_NAME:=host.containers.internal}"
-export KIND_EXPERIMENTAL_PROVIDER="${KIND_EXPERIMENTAL_PROVIDER:-podman}"
-
+# Message helpers are defined FIRST because detect_runtime() below calls die()
+# when the configured runtime is invalid. Defining them after would turn a clear
+# "CONTAINER_CLI must be docker or podman" into "die: command not found".
 log()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[!]\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31m[x]\033[0m %s\n' "$*" >&2; exit 1; }
 ok()   { printf '\033[1;32m[✓]\033[0m %s\n' "$*"; }
 
 need() { command -v "$1" >/dev/null 2>&1 || die "missing required tool: $1"; }
+
+# ---------------------------------------------------------------- runtime
+# Container runtime: docker or podman. One choice, everything else derived.
+#
+# Three settings must agree or the lab breaks in ways that look unrelated:
+#   CONTAINER_CLI            which binary to shell out to
+#   KIND_EXPERIMENTAL_PROVIDER  kind silently uses docker unless this says podman
+#   HOST_INTERNAL_NAME       podman and docker expose the host under DIFFERENT names
+#
+# Letting a person set those independently guarantees someone eventually has
+# CONTAINER_CLI=docker next to a stale KIND_EXPERIMENTAL_PROVIDER=podman, and
+# then kind builds a cluster one tool cannot see. So only CONTAINER_CLI is
+# configurable; the other two are computed from it, every time.
+detect_runtime() {
+  local want="${CONTAINER_CLI:-auto}"
+
+  if [[ "${want}" == "auto" || -z "${want}" ]]; then
+    # Prefer a runtime that is actually up, not merely installed.
+    if command -v podman >/dev/null 2>&1 && podman info >/dev/null 2>&1; then
+      want=podman
+    elif command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+      want=docker
+    elif command -v podman >/dev/null 2>&1; then
+      want=podman
+    elif command -v docker >/dev/null 2>&1; then
+      want=docker
+    else
+      die "neither podman nor docker found. brew install podman  (or docker)"
+    fi
+  fi
+
+  case "${want}" in
+    podman)
+      CONTAINER_CLI=podman
+      export KIND_EXPERIMENTAL_PROVIDER=podman
+      HOST_INTERNAL_NAME=host.containers.internal
+      ;;
+    docker)
+      CONTAINER_CLI=docker
+      # Must be EMPTY, not "docker" -- kind only recognises podman/nerdctl here
+      # and any other non-empty value is an error.
+      unset KIND_EXPERIMENTAL_PROVIDER
+      HOST_INTERNAL_NAME=host.docker.internal
+      # Older docker CLIs gate `docker manifest inspect` behind this.
+      export DOCKER_CLI_EXPERIMENTAL=enabled
+      ;;
+    *) die "CONTAINER_CLI must be docker, podman, or auto (got: ${want})" ;;
+  esac
+  export CONTAINER_CLI HOST_INTERNAL_NAME
+}
+detect_runtime
+
+# True when the runtime keeps its own Linux VM whose size is fixed at creation
+# (podman machine). Docker Desktop is resized through its own settings UI.
+runtime_uses_machine() { [[ "${CONTAINER_CLI}" == "podman" ]]; }
+
 
 ctr()  { "${CONTAINER_CLI}" "$@"; }
 kctl() { kubectl --context "kind-${CLUSTER_NAME}" "$@"; }
@@ -66,10 +121,18 @@ resolve_host_ip() {
           | awk '{print $1}' || true)"
   fi
 
-  # gvproxy default on podman machine
-  if [[ -z "${ip}" ]] && ctr machine list --format '{{.Name}}' 2>/dev/null | grep -q .; then
-    ip="192.168.127.254"
-    warn "${HOST_INTERNAL_NAME} unresolved; assuming gvproxy host address ${ip}"
+  # Last-resort fallback, and it is runtime-specific.
+  if [[ -z "${ip}" ]]; then
+    if runtime_uses_machine; then
+      # podman machine routes host traffic through gvproxy, which parks the
+      # macOS host at a fixed address on the VM's internal network.
+      ip="192.168.127.254"
+      warn "${HOST_INTERNAL_NAME} unresolved; assuming gvproxy host address ${ip}"
+    else
+      # Docker: the kind bridge gateway reaches the Docker VM, which forwards.
+      ip="$(ctr network inspect kind -f '{{(index .IPAM.Config 0).Gateway}}' 2>/dev/null || true)"
+      [[ -n "${ip}" ]] && warn "${HOST_INTERNAL_NAME} unresolved; using bridge gateway ${ip}"
+    fi
   fi
 
   [[ -n "${ip}" ]] || die "could not resolve a route from the cluster to the host"

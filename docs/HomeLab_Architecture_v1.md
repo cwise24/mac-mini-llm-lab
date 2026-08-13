@@ -108,7 +108,19 @@ The nginx config disables `proxy_buffering`. Without that, SSE token deltas accu
 
 Extra kind workers cost roughly 600 MB each in kubelet and containerd overhead and buy nothing: there is one physical machine and no real failure domain to spread across. The node carries `llm-lab.io/pool` and `llm-lab.io/accelerator` labels so manifests can *express* placement intent — which means adding a real GPU node later is a label change, not a rewrite.
 
-### 3.6 Podman specifics
+### 3.6 Runtime portability, and its one sharp edge
+
+The lab runs on podman or docker. `CONTAINER_CLI` is the only setting; the kind
+provider and the host-access name are derived from it, because those three must
+agree and independent settings drift.
+
+What does **not** move with you: the cluster and the local registry. kind clusters
+are runtime-scoped, and switching while one is live orphans it — running, holding
+disk and port 8080, invisible to `kind get clusters`. Since the failure leaves no
+error to notice, the switch is gated on the cluster being gone rather than
+documented and hoped for. `make orphans` audits both runtimes.
+
+### 3.7 Podman specifics
 
 Podman is not a drop-in for Docker here. Four differences bite:
 

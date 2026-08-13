@@ -29,6 +29,12 @@ help: ## show this help
 init: ## create .env from the example
 	@[[ -f .env ]] && echo ".env exists, leaving it alone" || { cp .env.example .env; echo "created .env"; }
 
+.PHONY: use-docker use-podman
+use-docker: ## switch runtime to docker (refuses if a cluster would be stranded)
+	@$(S)/switch-runtime.sh docker
+use-podman: ## switch runtime to podman (refuses if a cluster would be stranded)
+	@$(S)/switch-runtime.sh podman
+
 .PHONY: preflight
 preflight: ## check podman, memory, tools, host engine
 	@$(S)/preflight.sh
@@ -107,6 +113,10 @@ logs-gateway: ## follow the active AI gateway
 .PHONY: bench
 bench: ## compare gateway overhead: through ingress vs straight to the backend
 	@$(S)/bench.sh
+
+.PHONY: orphans
+orphans: ## find kind clusters/registries left behind under EITHER runtime
+	@$(S)/orphans.sh
 
 .PHONY: down
 down: ## delete the cluster, keep the built image

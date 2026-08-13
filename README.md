@@ -37,6 +37,29 @@ docs/
   HomeLab_Runbook_v1.md      setup, exercises, troubleshooting
 ```
 
+## Container runtime
+
+Runs on **podman or docker**. Pick one; everything else is derived.
+
+```bash
+make use-podman        # or: make use-docker
+make preflight
+make bootstrap
+```
+
+**Run `make down` before switching runtimes.** kind clusters are not portable
+between them, and switching with one running orphans it silently — still holding
+disk and port 8080, but invisible to `kind`. The switch targets refuse to do this
+to you, and `make orphans` finds anything already stranded.
+
+## Cleaning up
+
+```bash
+make down       # delete the cluster; keeps registry + vLLM image
+make nuke       # delete cluster, registry and cached charts
+make orphans    # report resources under EITHER runtime
+```
+
 ## Read this before running anything
 
 Apple Silicon passes **no GPU into containers**. In-cluster inference is CPU-only and slow, and llm-d's own CPU backend (Intel AMX, 64 cores, 64 GB/replica) is unreachable on ARM at any configuration.

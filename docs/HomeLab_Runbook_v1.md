@@ -1,18 +1,72 @@
 # Runbook
 
+## Choosing a container runtime
+
+kind runs on either **podman** or **docker**. Pick one in `.env`:
+
+```bash
+make use-podman     # or: make use-docker
+make rebuild        # required -- see below
+```
+
+`CONTAINER_CLI` is the only knob. `KIND_EXPERIMENTAL_PROVIDER` and
+`HOST_INTERNAL_NAME` are derived from it in `scripts/lib.sh`, because those three
+have to agree and setting them separately is how you end up with
+`CONTAINER_CLI=docker` beside a stale `KIND_EXPERIMENTAL_PROVIDER=podman` — which
+builds a cluster one tool cannot see.
+
+### Tear down BEFORE you switch
+
+```bash
+make down          # first
+make use-docker    # then
+```
+
+kind clusters are not portable between runtimes. Switching while one exists does
+not error — the containers keep running under the **old** runtime, but
+`kind get clusters` now asks the **new** one and reports nothing. The cluster
+looks deleted while still holding several GB of disk and still binding port 8080,
+so the next `make up` builds a second cluster and the first becomes invisible to
+every command in this repo.
+
+`make use-docker` / `make use-podman` refuse to switch while a cluster is live
+and tell you what to run. Override with `FORCE=1` only if you intend to clean up
+by hand afterwards.
+
+Also note the **local registry is runtime-scoped**. It holds the vLLM image
+(~550 MB), does not follow you across a switch, and the new runtime starts an
+empty one — so `make build-vllm` will re-pull.
+
+```bash
+make orphans       # find anything left under EITHER runtime
+```
+
+Differences the lab handles for you:
+
+| | podman | docker |
+|---|---|---|
+| kind provider | `KIND_EXPERIMENTAL_PROVIDER=podman` | unset |
+| Host from a pod | `host.containers.internal` (gvproxy, `192.168.127.254`) | `host.docker.internal` |
+| Resource sizing | fixed at `podman machine init` | Docker Desktop → Settings → Resources |
+| Root mode | **must be rootful** for kind | n/a |
+
 ## Prerequisites
 
 ```bash
-brew install podman kind kubectl helm jq
+brew install kind kubectl helm jq
+brew install podman          # or: brew install --cask docker
 ```
 
-Podman machine — memory is fixed at init, so size it now:
+**Podman** — memory is fixed at init, so size it now:
 
 ```bash
 podman machine init --cpus 6 --memory 10240 --disk-size 80
 podman machine set --rootful          # kind + rootless podman is unreliable
 podman machine start
 ```
+
+**Docker** — no machine to create; open Docker Desktop and set
+Settings → Resources to at least 6 CPUs and 10 GB, then `make use-docker`.
 
 Host inference engine (this is where real speed comes from):
 
@@ -37,6 +91,24 @@ Start with `PROFILE=lite` to validate the whole path in about three minutes befo
 
 ---
 
+## Cleaning up
+
+| Command | Removes | Keeps |
+|---|---|---|
+| `make down` | the cluster (and sweeps orphaned node containers) | registry, vLLM image, `.state/` chart clones |
+| `make nuke` | cluster **and** registry **and** `.state/` | nothing |
+| `make orphans` | nothing — reports only | — |
+
+`make down` is the one to run before switching runtimes, before a long break, or
+any time you want the RAM back. It deliberately leaves the registry, because the
+vLLM image is the expensive thing to rebuild.
+
+`make nuke` when you want the disk back or suspect the cached charts are stale.
+Expect the next build to re-pull ~550 MB of vLLM plus the chart clones.
+
+Neither touches the model cache inside the cluster's PVC — that dies with the
+cluster, so `make down` does mean re-downloading Qwen on the next `make backends`.
+
 ## Daily use
 
 ```bash
@@ -52,6 +124,7 @@ make logs-epp                  # watch routing decisions
 make bench N=50                # gateway overhead, meaningful only on lite
 make recreate                  # delete and rebuild the cluster from scratch
 make down                      # delete cluster, keep the built image
+make orphans                   # check for clusters left under the other runtime
 make nuke                      # also delete the registry
 ```
 
