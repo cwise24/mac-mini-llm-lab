@@ -1,0 +1,125 @@
+# Bifrost: the performance-oriented option.
+#
+# Chosen when GATEWAY=bifrost. Go-based, sub-100us overhead claims, adaptive load
+# balancing. For this lab its value is comparative: run the identical smoke test
+# through Envoy AI Gateway, LiteLLM, and Bifrost and measure the gateway's own
+# added latency with a mock backend, where the model is not the bottleneck.
+#
+# Deploys as a StatefulSet with a PVC by default. SQLite-only mode is used here;
+# Postgres HA mode is pointless on one node.
+#
+# Chart lives at helm-charts/bifrost on the `dev` branch; no public chart repo
+# exists, so it is installed from git source.
+replicaCount: 1
+
+image:
+  repository: docker.io/maximhq/bifrost
+  tag: latest
+  pullPolicy: IfNotPresent
+
+resources:
+  requests: { cpu: 100m, memory: 128Mi }
+  limits:   { memory: 512Mi }
+
+# The chart's schema is storage.persistence.*, NOT storage.enabled/storage.size.
+# Helm silently ignores unknown keys, so the previous spelling did nothing at all
+# and the chart quietly fell back to its 10Gi default.
+storage:
+  mode: sqlite
+  persistence:
+    enabled: true
+    accessMode: ReadWriteOnce
+    size: 2Gi
+
+service:
+  type: ClusterIP
+  port: 8080
+
+postgresql:
+  enabled: false
+
+# Chart key is `bifrost:`, not `config:`.
+bifrost:
+  # Make this file authoritative over the database.
+  #
+  # Bifrost persists provider config into SQLite on the PVC, and the chart
+  # default ("split") lets DB rows and config.json coexist -- with the DB
+  # winning for anything already there. The PVC outlives `helm uninstall`, so a
+  # provider first created with bad settings stays broken through every
+  # reinstall no matter what you put in this file, and the rendered ConfigMap
+  # looks perfectly correct the whole time. "config.json" prunes DB-only rows
+  # for the sections declared here, which is what makes `make gateway
+  # GW=bifrost` actually reproducible.
+  sourceOfTruth: "config.json"
+  client:
+    # Accept a plain OpenAI request, like the other two gateways do.
+    #
+    # Bifrost's binary is open by default, but this CHART turns on inference
+    # auth "for production". With it on, every /v1/chat/completions is rejected
+    # 401 "virtual key is required. Provide a virtual key via the x-bf-vk
+    # header" -- a Bifrost-specific header that neither LiteLLM nor Envoy AI
+    # Gateway has. Honouring it would mean a bespoke smoke test for one gateway
+    # and would break the whole point of the swap contract, which is that the
+    # identical request works against all four modes. Turned off because this is
+    # a single-user lab on localhost; leave it ON anywhere real.
+    enforceAuthOnInference: false
+  providers:
+    # Bifrost treats any OpenAI-compatible endpoint as a custom provider.
+    #
+    # Two things here are easy to get wrong and both fail at runtime, not at
+    # install time:
+    #   1. each key needs a `name` -- the chart documents it as required and
+    #      unique, and it is not defaulted.
+    #   2. allow_private_network MUST be true. It defaults to false, and every
+    #      backend in this lab is a ClusterIP on the pod network (RFC 1918), so
+    #      the default makes Bifrost refuse to connect to all of them.
+    vllm-cpu:
+      # A provider key that is not one of Bifrost's built-in provider TYPES is a
+      # custom provider, and a custom provider without custom_provider_config has
+      # no wire protocol to speak. The failure is silent and awful: config loads,
+      # the model resolves ("provider":"vllm-cpu"), and then the request simply
+      # hangs until something upstream times out. base_provider_type tells it to
+      # use the vLLM dialect; is_key_less says stop demanding an API key for a
+      # backend that has no auth.
+      custom_provider_config:
+        # openai, NOT vllm -- even though the published JSON schema
+        # (getbifrost.ai/schema) lists "vllm" in the base_provider_type enum.
+        # The maximhq/bifrost:latest binary rejects it at startup with
+        #   failed to prepare provider vllm-cpu: unsupported base provider
+        #   type: vllm
+        # and then, because the provider was never constructed, every request
+        # naming it hangs until the caller gives up rather than erroring. The
+        # schema is ahead of the shipped image. vLLM's surface is
+        # OpenAI-compatible, so the openai dialect is correct regardless.
+        base_provider_type: openai
+        is_key_less: true
+      keys:
+        - name: "vllm-cpu-key"
+          value: "none"
+          models: ["__VLLM_SERVED_NAME__"]
+          weight: 1.0
+      network_config:
+        base_url: http://vllm-cpu.llm-serving.svc.cluster.local:8000
+        default_request_timeout_in_seconds: 600
+        allow_private_network: true
+      concurrency_and_buffer_size:
+        concurrency: 2
+        buffer_size: 10
+    host-metal:
+      # Same story. The bridge re-exposes the host engine's OpenAI-compatible
+      # /v1 surface, so the base type here is plain openai.
+      custom_provider_config:
+        base_provider_type: openai
+        is_key_less: true
+      keys:
+        - name: "host-metal-key"
+          value: "none"
+          models: ["__HOST_ENGINE_MODEL__"]
+          weight: 1.0
+      network_config:
+        base_url: http://host-bridge.llm-serving.svc.cluster.local:8000
+        default_request_timeout_in_seconds: 600
+        allow_private_network: true
+      concurrency_and_buffer_size:
+        concurrency: 4
+        buffer_size: 20

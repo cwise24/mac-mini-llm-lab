@@ -1,0 +1,49 @@
+# Bridges the cluster to a Metal-accelerated inference engine on macOS.
+#
+# This exists because pods cannot resolve host.containers.internal (that name lives in
+# the node container's /etc/hosts, not in cluster DNS). Rather than fight DNS, we
+# run a tiny nginx pod whose upstream IP is injected at deploy time. The result is
+# an ordinary ClusterIP Service with real endpoints, so gateways and the endpoint
+# picker treat host-served models exactly like in-cluster ones.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: host-bridge
+  namespace: llm-serving
+  labels: { app: host-bridge, llm-lab.io/backend: host-metal }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: host-bridge }
+  template:
+    metadata:
+      labels: { app: host-bridge, llm-lab.io/backend: host-metal }
+    spec:
+      containers:
+        - name: nginx
+          image: NGINX_IMAGE_PLACEHOLDER
+          ports:
+            - { name: http, containerPort: 8000 }
+          volumeMounts:
+            - { name: conf, mountPath: /etc/nginx/conf.d }
+          resources:
+            requests: { cpu: 25m, memory: 32Mi }
+            limits:   { memory: 128Mi }
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8000 }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+      volumes:
+        - name: conf
+          configMap: { name: host-bridge-conf }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: host-bridge
+  namespace: llm-serving
+  labels: { app: host-bridge }
+spec:
+  selector: { app: host-bridge }
+  ports:
+    - { name: http, port: 8000, targetPort: 8000 }

@@ -1,0 +1,26 @@
+# GATEWAY=none: NGF talks straight to the InferencePool, no AI gateway hop.
+#
+# NGF implements the Gateway API Inference Extension, so it can reference an
+# InferencePool as a backendRef directly and consult the Endpoint Picker itself.
+# This is the leanest possible path and the best way to isolate whether latency
+# you are seeing comes from the AI gateway or from the model.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: inferencepool-direct
+  namespace: llm-serving
+spec:
+  parentRefs:
+    - name: llm-ingress
+      namespace: llm-gateway
+  rules:
+    - matches:
+        - path: { type: PathPrefix, value: /v1 }
+      backendRefs:
+        - group: inference.networking.k8s.io
+          kind: InferencePool
+          name: primary-pool
+# No `timeouts:` here either -- NGF forbids HTTPRoute rule timeouts and silently
+# ignores them (see the note in gateway.yaml). Timeouts and buffering for every
+# route through this Gateway come from the ProxySettingsPolicy defined there,
+# which applies to this route too.
