@@ -1,34 +1,11 @@
 
 ===== when =====
-Thu Aug 13 10:06:06 PDT 2026
-
-===== command: make smoke =====
-$ make smoke
-[1;34m==>[0m smoke test against http://localhost:8080 (gateway: envoy, profile: full)
-[1;32m[✓][0m ingress reachable
-[1;34m==>[0m advertised models:
-    qwen-small
-    llama3.2:3b
-[1;34m==>[0m chat completion against 'qwen-small' (CPU inference is slow; allow ~2 min)
-[1;32m[✓][0m chat completion
-    reply: OK
-[1;34m==>[0m streaming (SSE must not be buffered by NGF or the bridge)
-[1;32m[✓][0m streaming
-[1;34m==>[0m endpoint picker health
-[1;32m[✓][0m EPP ready (1 replica)
-[1;32m[✓][0m InferencePool has 1 running backend pod(s)
-[1;34m==>[0m InferencePool:
-    NAME           AGE
-    primary-pool   118s
-
-[1;32m[✓][0m smoke passed (5 checks)
+Thu Aug 13 13:00:30 PDT 2026
 
 ===== config =====
 
 $ bash -c grep -vE "^\s*#|^\s*$" "/Users/cwise/Projects/GH/ai-cluade-lab/CLAUDE OUTPUTS/mac-mini-llm-lab/.env" 2>/dev/null
 CONTAINER_CLI=podman
-KIND_EXPERIMENTAL_PROVIDER=podman
-HOST_INTERNAL_NAME=host.containers.internal
 CLUSTER_NAME=llm-lab
 KIND_NODE_IMAGE=kindest/node:v1.34.0
 REGISTRY_NAME=kind-registry
@@ -52,6 +29,7 @@ GATEWAY=envoy
 GIE_VERSION=v1.5.0
 ENVOY_GATEWAY_VERSION=v1.5.6
 ENVOY_AI_GATEWAY_VERSION=v1.0.0
+LITELLM_WITH_DB=false
 LITELLM_CHART_VERSION=1.1.1
 LITELLM_CHART_REF=main
 BIFROST_CHART_VERSION=2.1.33
@@ -63,36 +41,34 @@ MOCK_IMAGE=ghcr.io/berriai/litellm:main-stable
 ===== nodes =====
 
 $ kctl get nodes -o wide
-NAME                    STATUS   ROLES           AGE     VERSION   INTERNAL-IP   EXTERNAL-IP   OS-IMAGE                         KERNEL-VERSION           CONTAINER-RUNTIME
-llm-lab-control-plane   Ready    control-plane   4m35s   v1.34.0   10.89.0.5     <none>        Debian GNU/Linux 12 (bookworm)   7.1.3-200.fc44.aarch64   containerd://2.1.3
+NAME                    STATUS   ROLES           AGE   VERSION   INTERNAL-IP   EXTERNAL-IP   OS-IMAGE                         KERNEL-VERSION           CONTAINER-RUNTIME
+llm-lab-control-plane   Ready    control-plane   29m   v1.34.0   10.89.0.8     <none>        Debian GNU/Linux 12 (bookworm)   7.1.3-200.fc44.aarch64   containerd://2.1.3
 
 $ kctl get nodes --show-labels
-NAME                    STATUS   ROLES           AGE     VERSION   LABELS
-llm-lab-control-plane   Ready    control-plane   4m35s   v1.34.0   beta.kubernetes.io/arch=arm64,beta.kubernetes.io/os=linux,ingress-ready=true,kubernetes.io/arch=arm64,kubernetes.io/hostname=llm-lab-control-plane,kubernetes.io/os=linux,llm-lab.io/accelerator=none,llm-lab.io/pool=inference,node-role.kubernetes.io/control-plane=
+NAME                    STATUS   ROLES           AGE   VERSION   LABELS
+llm-lab-control-plane   Ready    control-plane   29m   v1.34.0   beta.kubernetes.io/arch=arm64,beta.kubernetes.io/os=linux,ingress-ready=true,kubernetes.io/arch=arm64,kubernetes.io/hostname=llm-lab-control-plane,kubernetes.io/os=linux,llm-lab.io/accelerator=none,llm-lab.io/pool=inference,node-role.kubernetes.io/control-plane=
 
 ===== all pods =====
 
 $ kctl get pods -A -o wide
-NAMESPACE                 NAME                                                           READY   STATUS    RESTARTS   AGE     IP            NODE                    NOMINATED NODE   READINESS GATES
-envoy-ai-gateway-system   ai-gateway-controller-6cfbbf48bc-t58zm                         1/1     Running   0          74s     10.244.0.17   llm-lab-control-plane   <none>           <none>
-envoy-gateway-system      envoy-gateway-7c999dc6f9-w9dc9                                 1/1     Running   0          89s     10.244.0.16   llm-lab-control-plane   <none>           <none>
-envoy-gateway-system      envoy-llm-gateway-envoy-ai-gateway-3a17de18-7cf5785799-dllzz   3/3     Running   0          64s     10.244.0.19   llm-lab-control-plane   <none>           <none>
-kube-system               coredns-66bc5c9577-6bpkj                                       1/1     Running   0          4m27s   10.244.0.2    llm-lab-control-plane   <none>           <none>
-kube-system               coredns-66bc5c9577-c7qlm                                       1/1     Running   0          4m27s   10.244.0.4    llm-lab-control-plane   <none>           <none>
-kube-system               etcd-llm-lab-control-plane                                     1/1     Running   0          4m33s   10.89.0.5     llm-lab-control-plane   <none>           <none>
-kube-system               kindnet-vdff5                                                  1/1     Running   0          4m27s   10.89.0.5     llm-lab-control-plane   <none>           <none>
-kube-system               kube-apiserver-llm-lab-control-plane                           1/1     Running   0          4m33s   10.89.0.5     llm-lab-control-plane   <none>           <none>
-kube-system               kube-controller-manager-llm-lab-control-plane                  1/1     Running   0          4m33s   10.89.0.5     llm-lab-control-plane   <none>           <none>
-kube-system               kube-proxy-4792w                                               1/1     Running   0          4m27s   10.89.0.5     llm-lab-control-plane   <none>           <none>
-kube-system               kube-scheduler-llm-lab-control-plane                           1/1     Running   0          4m33s   10.89.0.5     llm-lab-control-plane   <none>           <none>
-llm-gateway               llm-ingress-nginx-84bd78f64-2khg6                              2/2     Running   0          3m47s   10.244.0.7    llm-lab-control-plane   <none>           <none>
-llm-serving               host-bridge-7c9bfc687c-hpct8                                   1/1     Running   0          3m46s   10.244.0.9    llm-lab-control-plane   <none>           <none>
-llm-serving               mock-backend-79b4f6477c-c55p2                                  1/1     Running   0          3m27s   10.244.0.11   llm-lab-control-plane   <none>           <none>
-llm-serving               mock-backend-79b4f6477c-lvb2l                                  1/1     Running   0          3m27s   10.244.0.10   llm-lab-control-plane   <none>           <none>
-llm-serving               primary-pool-epp-74448d9c74-2m5x7                              1/1     Running   0          118s    10.244.0.14   llm-lab-control-plane   <none>           <none>
-llm-serving               vllm-cpu-f9cb85dbf-lflvh                                       1/1     Running   0          3m11s   10.244.0.13   llm-lab-control-plane   <none>           <none>
-local-path-storage        local-path-provisioner-7b8c8ddbd6-qw5s2                        1/1     Running   0          4m27s   10.244.0.3    llm-lab-control-plane   <none>           <none>
-nginx-gateway             ngf-nginx-gateway-fabric-56dfc4fb5-cmk7s                       1/1     Running   0          3m59s   10.244.0.6    llm-lab-control-plane   <none>           <none>
+NAMESPACE            NAME                                            READY   STATUS    RESTARTS        AGE     IP            NODE                    NOMINATED NODE   READINESS GATES
+kube-system          coredns-66bc5c9577-hfsn2                        1/1     Running   0               29m     10.244.0.2    llm-lab-control-plane   <none>           <none>
+kube-system          coredns-66bc5c9577-pl2wf                        1/1     Running   0               29m     10.244.0.4    llm-lab-control-plane   <none>           <none>
+kube-system          etcd-llm-lab-control-plane                      1/1     Running   0               29m     10.89.0.8     llm-lab-control-plane   <none>           <none>
+kube-system          kindnet-gssds                                   1/1     Running   0               29m     10.89.0.8     llm-lab-control-plane   <none>           <none>
+kube-system          kube-apiserver-llm-lab-control-plane            1/1     Running   0               29m     10.89.0.8     llm-lab-control-plane   <none>           <none>
+kube-system          kube-controller-manager-llm-lab-control-plane   1/1     Running   0               29m     10.89.0.8     llm-lab-control-plane   <none>           <none>
+kube-system          kube-proxy-7pkgt                                1/1     Running   0               29m     10.89.0.8     llm-lab-control-plane   <none>           <none>
+kube-system          kube-scheduler-llm-lab-control-plane            1/1     Running   0               29m     10.89.0.8     llm-lab-control-plane   <none>           <none>
+llm-gateway          litellm-f8f86fdb5-p2hzm                         1/1     Running   1 (5m18s ago)   5m58s   10.244.0.22   llm-lab-control-plane   <none>           <none>
+llm-gateway          litellm-postgresql-0                            1/1     Running   0               5m58s   10.244.0.25   llm-lab-control-plane   <none>           <none>
+llm-gateway          llm-ingress-nginx-786c5bf496-xtlrp              2/2     Running   0               29m     10.244.0.7    llm-lab-control-plane   <none>           <none>
+llm-serving          host-bridge-647b668798-f5q4b                    1/1     Running   0               29m     10.244.0.9    llm-lab-control-plane   <none>           <none>
+llm-serving          mock-backend-79b4f6477c-6wd8q                   1/1     Running   0               28m     10.244.0.11   llm-lab-control-plane   <none>           <none>
+llm-serving          mock-backend-79b4f6477c-grf4n                   1/1     Running   0               28m     10.244.0.10   llm-lab-control-plane   <none>           <none>
+llm-serving          primary-pool-epp-74448d9c74-whlz7               1/1     Running   0               27m     10.244.0.14   llm-lab-control-plane   <none>           <none>
+local-path-storage   local-path-provisioner-7b8c8ddbd6-vxxrl         1/1     Running   0               29m     10.244.0.3    llm-lab-control-plane   <none>           <none>
+nginx-gateway        ngf-nginx-gateway-fabric-56dfc4fb5-qz7jg        1/1     Running   0               29m     10.244.0.6    llm-lab-control-plane   <none>           <none>
 
 ===== not running =====
 
@@ -102,57 +78,56 @@ $ bash -c kubectl --context kind-llm-lab get pods -A --field-selector=status.pha
 
 $ kctl -n llm-serving get all
 NAME                                    READY   STATUS    RESTARTS   AGE
-pod/host-bridge-7c9bfc687c-hpct8        1/1     Running   0          3m47s
-pod/mock-backend-79b4f6477c-c55p2       1/1     Running   0          3m28s
-pod/mock-backend-79b4f6477c-lvb2l       1/1     Running   0          3m28s
-pod/primary-pool-epp-74448d9c74-2m5x7   1/1     Running   0          119s
-pod/vllm-cpu-f9cb85dbf-lflvh            1/1     Running   0          3m12s
+pod/host-bridge-647b668798-f5q4b        1/1     Running   0          29m
+pod/mock-backend-79b4f6477c-6wd8q       1/1     Running   0          28m
+pod/mock-backend-79b4f6477c-grf4n       1/1     Running   0          28m
+pod/primary-pool-epp-74448d9c74-whlz7   1/1     Running   0          27m
 
 NAME                       TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)             AGE
-service/host-bridge        ClusterIP   10.96.18.71     <none>        8000/TCP            3m47s
-service/mock-backend       ClusterIP   10.96.220.8     <none>        8000/TCP            3m28s
-service/primary-pool-epp   ClusterIP   10.96.96.176    <none>        9002/TCP,9090/TCP   119s
-service/vllm-cpu           ClusterIP   10.96.160.244   <none>        8000/TCP            3m12s
-service/vllm-cpu-direct    NodePort    10.96.50.131    <none>        8000:30081/TCP      3m12s
+service/host-bridge        ClusterIP   10.96.142.103   <none>        8000/TCP            29m
+service/mock-backend       ClusterIP   10.96.5.15      <none>        8000/TCP            28m
+service/primary-pool-epp   ClusterIP   10.96.160.74    <none>        9002/TCP,9090/TCP   27m
+service/vllm-cpu           ClusterIP   10.96.49.123    <none>        8000/TCP            28m
+service/vllm-cpu-direct    NodePort    10.96.179.219   <none>        8000:30081/TCP      28m
 
 NAME                               READY   UP-TO-DATE   AVAILABLE   AGE
-deployment.apps/host-bridge        1/1     1            1           3m47s
-deployment.apps/mock-backend       2/2     2            2           3m28s
-deployment.apps/primary-pool-epp   1/1     1            1           119s
-deployment.apps/vllm-cpu           1/1     1            1           3m13s
+deployment.apps/host-bridge        1/1     1            1           29m
+deployment.apps/mock-backend       2/2     2            2           28m
+deployment.apps/primary-pool-epp   1/1     1            1           27m
+deployment.apps/vllm-cpu           0/0     0            0           28m
 
 NAME                                          DESIRED   CURRENT   READY   AGE
-replicaset.apps/host-bridge-6697997764        0         0         0       3m47s
-replicaset.apps/host-bridge-7c9bfc687c        1         1         1       3m47s
-replicaset.apps/mock-backend-79b4f6477c       2         2         2       3m28s
-replicaset.apps/primary-pool-epp-74448d9c74   1         1         1       119s
-replicaset.apps/vllm-cpu-f9cb85dbf            1         1         1       3m12s
+replicaset.apps/host-bridge-647b668798        1         1         1       29m
+replicaset.apps/host-bridge-6697997764        0         0         0       29m
+replicaset.apps/mock-backend-79b4f6477c       2         2         2       28m
+replicaset.apps/primary-pool-epp-74448d9c74   1         1         1       27m
+replicaset.apps/vllm-cpu-65786c8f7d           0         0         0       28m
 
 $ kctl -n llm-serving describe pods
-Name:             host-bridge-7c9bfc687c-hpct8
+Name:             host-bridge-647b668798-f5q4b
 Namespace:        llm-serving
 Priority:         0
 Service Account:  default
-Node:             llm-lab-control-plane/10.89.0.5
-Start Time:       Thu, 13 Aug 2026 10:02:25 -0700
+Node:             llm-lab-control-plane/10.89.0.8
+Start Time:       Thu, 13 Aug 2026 12:31:26 -0700
 Labels:           app=host-bridge
                   llm-lab.io/backend=host-metal
-                  pod-template-hash=7c9bfc687c
-Annotations:      kubectl.kubernetes.io/restartedAt: 2026-08-13T10:02:25-07:00
+                  pod-template-hash=647b668798
+Annotations:      kubectl.kubernetes.io/restartedAt: 2026-08-13T12:31:26-07:00
 Status:           Running
 IP:               10.244.0.9
 IPs:
   IP:           10.244.0.9
-Controlled By:  ReplicaSet/host-bridge-7c9bfc687c
+Controlled By:  ReplicaSet/host-bridge-647b668798
 Containers:
   nginx:
-    Container ID:   containerd://9b4bfa266d16bcbda52e7a9f17f62d1beafb7ab5ff2dc9055aa86f84282371c6
+    Container ID:   containerd://39a2d651dacbab908979248170090446119513db6fbe1f5851235d4231d33277
     Image:          nginx:1.27-alpine
     Image ID:       docker.io/library/nginx@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10
     Port:           8000/TCP (http)
     Host Port:      0/TCP (http)
     State:          Running
-      Started:      Thu, 13 Aug 2026 10:02:33 -0700
+      Started:      Thu, 13 Aug 2026 12:31:33 -0700
     Ready:          True
     Restart Count:  0
     Limits:
@@ -164,7 +139,7 @@ Containers:
     Environment:  <none>
     Mounts:
       /etc/nginx/conf.d from conf (rw)
-      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-95pxz (ro)
+      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-nsk9l (ro)
 Conditions:
   Type                        Status
   PodReadyToStartContainers   True 
@@ -177,7 +152,7 @@ Volumes:
     Type:      ConfigMap (a volume populated by a ConfigMap)
     Name:      host-bridge-conf
     Optional:  false
-  kube-api-access-95pxz:
+  kube-api-access-nsk9l:
     Type:                    Projected (a volume that contains injected data from multiple sources)
     TokenExpirationSeconds:  3607
     ConfigMapName:           kube-root-ca.crt
@@ -189,12 +164,12 @@ Tolerations:                 node.kubernetes.io/not-ready:NoExecute op=Exists fo
                              node.kubernetes.io/unreachable:NoExecute op=Exists for 300s
 
 
-Name:             mock-backend-79b4f6477c-c55p2
+Name:             mock-backend-79b4f6477c-6wd8q
 Namespace:        llm-serving
 Priority:         0
 Service Account:  default
-Node:             llm-lab-control-plane/10.89.0.5
-Start Time:       Thu, 13 Aug 2026 10:02:44 -0700
+Node:             llm-lab-control-plane/10.89.0.8
+Start Time:       Thu, 13 Aug 2026 12:31:36 -0700
 Labels:           app=mock-backend
                   llm-lab.io/backend=mock
                   llm-lab.io/inference-pool=mock
@@ -208,7 +183,7 @@ IPs:
 Controlled By:  ReplicaSet/mock-backend-79b4f6477c
 Containers:
   mock:
-    Container ID:  containerd://59c820ffe3390af016364a492c57a7983da6ec09ae0612fd839f0f8715c4ea25
+    Container ID:  containerd://b6aef1f957bd80c24114a3b33c03cdb69b7b0077f72ccc8b3a9286ef4643ace9
     Image:         python:3.12-alpine
     Image ID:      docker.io/library/python@sha256:6d43704baacd1bfbe7c295d7f13079d5d8104ed33568873133f8fc69980419df
     Port:          8000/TCP (http)
@@ -217,7 +192,7 @@ Containers:
       python
       /app/app.py
     State:          Running
-      Started:      Thu, 13 Aug 2026 10:02:48 -0700
+      Started:      Thu, 13 Aug 2026 12:31:39 -0700
     Ready:          True
     Restart Count:  0
     Limits:
@@ -229,7 +204,7 @@ Containers:
     Environment:  <none>
     Mounts:
       /app from app (rw)
-      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-lffvl (ro)
+      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-fwhnq (ro)
 Conditions:
   Type                        Status
   PodReadyToStartContainers   True 
@@ -242,7 +217,7 @@ Volumes:
     Type:      ConfigMap (a volume populated by a ConfigMap)
     Name:      mock-backend-app
     Optional:  false
-  kube-api-access-lffvl:
+  kube-api-access-fwhnq:
     Type:                    Projected (a volume that contains injected data from multiple sources)
     TokenExpirationSeconds:  3607
     ConfigMapName:           kube-root-ca.crt
@@ -254,12 +229,12 @@ Tolerations:                 node.kubernetes.io/not-ready:NoExecute op=Exists fo
                              node.kubernetes.io/unreachable:NoExecute op=Exists for 300s
 
 
-Name:             mock-backend-79b4f6477c-lvb2l
+Name:             mock-backend-79b4f6477c-grf4n
 Namespace:        llm-serving
 Priority:         0
 Service Account:  default
-Node:             llm-lab-control-plane/10.89.0.5
-Start Time:       Thu, 13 Aug 2026 10:02:44 -0700
+Node:             llm-lab-control-plane/10.89.0.8
+Start Time:       Thu, 13 Aug 2026 12:31:36 -0700
 Labels:           app=mock-backend
                   llm-lab.io/backend=mock
                   llm-lab.io/inference-pool=mock
@@ -273,7 +248,7 @@ IPs:
 Controlled By:  ReplicaSet/mock-backend-79b4f6477c
 Containers:
   mock:
-    Container ID:  containerd://032e8a799e1cf384d60b496fe88143f6611c31e473da318ff247af03b863cc55
+    Container ID:  containerd://3dceef61a890529c4da8ebe91ebb55a747cde1c372dcf1a8fc4a570307cad9c9
     Image:         python:3.12-alpine
     Image ID:      docker.io/library/python@sha256:6d43704baacd1bfbe7c295d7f13079d5d8104ed33568873133f8fc69980419df
     Port:          8000/TCP (http)
@@ -282,7 +257,7 @@ Containers:
       python
       /app/app.py
     State:          Running
-      Started:      Thu, 13 Aug 2026 10:02:47 -0700
+      Started:      Thu, 13 Aug 2026 12:31:40 -0700
     Ready:          True
     Restart Count:  0
     Limits:
@@ -294,7 +269,7 @@ Containers:
     Environment:  <none>
     Mounts:
       /app from app (rw)
-      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-tt2fr (ro)
+      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-m8h5k (ro)
 Conditions:
   Type                        Status
   PodReadyToStartContainers   True 
@@ -307,7 +282,7 @@ Volumes:
     Type:      ConfigMap (a volume populated by a ConfigMap)
     Name:      mock-backend-app
     Optional:  false
-  kube-api-access-tt2fr:
+  kube-api-access-m8h5k:
     Type:                    Projected (a volume that contains injected data from multiple sources)
     TokenExpirationSeconds:  3607
     ConfigMapName:           kube-root-ca.crt
@@ -319,12 +294,12 @@ Tolerations:                 node.kubernetes.io/not-ready:NoExecute op=Exists fo
                              node.kubernetes.io/unreachable:NoExecute op=Exists for 300s
 
 
-Name:             primary-pool-epp-74448d9c74-2m5x7
+Name:             primary-pool-epp-74448d9c74-whlz7
 Namespace:        llm-serving
 Priority:         0
 Service Account:  primary-pool-epp
-Node:             llm-lab-control-plane/10.89.0.5
-Start Time:       Thu, 13 Aug 2026 10:04:13 -0700
+Node:             llm-lab-control-plane/10.89.0.8
+Start Time:       Thu, 13 Aug 2026 12:33:05 -0700
 Labels:           app=primary-pool-epp
                   pod-template-hash=74448d9c74
 Annotations:      <none>
@@ -335,7 +310,7 @@ IPs:
 Controlled By:  ReplicaSet/primary-pool-epp-74448d9c74
 Containers:
   epp:
-    Container ID:  containerd://184a2dfbe63a3a5b5b034292780d59ac6bf23d30aee59eddb78ee505b6a06a3c
+    Container ID:  containerd://81cea582f7d89ce9e278bed2cb0c36090efbd1dd9252b8d361aa8af406be1448
     Image:         ghcr.io/llm-d/llm-d-inference-scheduler:v0.8.0
     Image ID:      ghcr.io/llm-d/llm-d-inference-scheduler@sha256:465fe24209153fa227bd97513259da62fc699a046df99cecd5fed39d16341eed
     Ports:         9002/TCP (grpc), 9003/TCP (grpc-health), 9090/TCP (metrics)
@@ -348,7 +323,7 @@ Containers:
       --metrics-port=9090
       -v=3
     State:          Running
-      Started:      Thu, 13 Aug 2026 10:04:16 -0700
+      Started:      Thu, 13 Aug 2026 12:33:08 -0700
     Ready:          True
     Restart Count:  0
     Limits:
@@ -360,7 +335,7 @@ Containers:
     Readiness:    grpc <pod>:9003 inference-extension delay=5s timeout=1s period=10s #success=1 #failure=3
     Environment:  <none>
     Mounts:
-      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-54c7f (ro)
+      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-b2tnw (ro)
 Conditions:
   Type                        Status
   PodReadyToStartContainers   True 
@@ -369,7 +344,7 @@ Conditions:
   ContainersReady             True 
   PodScheduled                True 
 Volumes:
-  kube-api-access-54c7f:
+  kube-api-access-b2tnw:
     Type:                    Projected (a volume that contains injected data from multiple sources)
     TokenExpirationSeconds:  3607
     ConfigMapName:           kube-root-ca.crt
@@ -380,205 +355,241 @@ Node-Selectors:              <none>
 Tolerations:                 node.kubernetes.io/not-ready:NoExecute op=Exists for 300s
                              node.kubernetes.io/unreachable:NoExecute op=Exists for 300s
 
-
-Name:             vllm-cpu-f9cb85dbf-lflvh
-Namespace:        llm-serving
-Priority:         0
-Service Account:  default
-Node:             llm-lab-control-plane/10.89.0.5
-Start Time:       Thu, 13 Aug 2026 10:03:03 -0700
-Labels:           app=vllm-cpu
-                  llm-lab.io/backend=vllm-cpu
-                  llm-lab.io/inference-pool=primary
-                  pod-template-hash=f9cb85dbf
-Annotations:      prometheus.io/path: /metrics
-                  prometheus.io/port: 8000
-                  prometheus.io/scrape: true
-Status:           Running
-IP:               10.244.0.13
-IPs:
-  IP:           10.244.0.13
-Controlled By:  ReplicaSet/vllm-cpu-f9cb85dbf
-Containers:
-  vllm:
-    Container ID:  containerd://5b015d72fdc66042f83dfc31aef118dc5f26bbc2c0b4b0b3d5d6624e49d2d77a
-    Image:         docker.io/mekayelanik/vllm-cpu:latest
-    Image ID:      docker.io/mekayelanik/vllm-cpu@sha256:25e552905bdc1fe2c75c706b30171dc82ac314a136ce0d423741e8bf677b4b73
-    Port:          8000/TCP (http)
-    Host Port:     0/TCP (http)
-    Command:
-      python3
-      -m
-      vllm.entrypoints.openai.api_server
-    Args:
-      --model=$(VLLM_MODEL)
-      --served-model-name=$(VLLM_SERVED_NAME)
-      --host=0.0.0.0
-      --port=8000
-      --dtype=bfloat16
-      --max-model-len=$(VLLM_MAX_MODEL_LEN)
-      --tensor-parallel-size=1
-      --no-enable-log-requests
-      --block-size=16
-      --enforce-eager
-    State:          Running
-      Started:      Thu, 13 Aug 2026 10:03:18 -0700
-    Ready:          True
-    Restart Count:  0
-    Limits:
-      cpu:     3
-      memory:  6Gi
-    Requests:
-      cpu:      2
-      memory:   3Gi
-    Liveness:   http-get http://:8000/health delay=0s timeout=1s period=30s #success=1 #failure=5
-    Readiness:  http-get http://:8000/health delay=0s timeout=1s period=10s #success=1 #failure=3
-    Startup:    http-get http://:8000/health delay=0s timeout=1s period=10s #success=1 #failure=90
-    Environment:
-      VLLM_MODEL:                 <set to the key 'model' of config map 'vllm-cpu-conf'>        Optional: false
-      VLLM_SERVED_NAME:           <set to the key 'servedName' of config map 'vllm-cpu-conf'>   Optional: false
-      VLLM_MAX_MODEL_LEN:         <set to the key 'maxModelLen' of config map 'vllm-cpu-conf'>  Optional: false
-      TORCHDYNAMO_DISABLE:        1
-      VLLM_CPU_KVCACHE_SPACE:     1
-      VLLM_CPU_OMP_THREADS_BIND:  auto
-      OMP_NUM_THREADS:            2
-      HF_HOME:                    /cache/hf
-      HF_TOKEN:                   <set to the key 'token' in secret 'hf-token'>  Optional: true
-    Mounts:
-      /cache/hf from hf-cache (rw)
-      /dev/shm from shm (rw)
-      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-x7hfr (ro)
-Conditions:
-  Type                        Status
-  PodReadyToStartContainers   True 
-  Initialized                 True 
-  Ready                       True 
-  ContainersReady             True 
-  PodScheduled                True 
-Volumes:
-  hf-cache:
-    Type:       PersistentVolumeClaim (a reference to a PersistentVolumeClaim in the same namespace)
-    ClaimName:  hf-cache
-    ReadOnly:   false
-  shm:
-    Type:       EmptyDir (a temporary directory that shares a pod's lifetime)
-    Medium:     Memory
-    SizeLimit:  1Gi
-  kube-api-access-x7hfr:
-    Type:                     Projected (a volume that contains injected data from multiple sources)
-    TokenExpirationSeconds:   3607
-    ConfigMapName:            kube-root-ca.crt
-    Optional:                 false
-    DownwardAPI:              true
-QoS Class:                    Burstable
-Node-Selectors:               llm-lab.io/pool=inference
-Tolerations:                  node.kubernetes.io/not-ready:NoExecute op=Exists for 300s
-                              node.kubernetes.io/unreachable:NoExecute op=Exists for 300s
-Topology Spread Constraints:  kubernetes.io/hostname:ScheduleAnyway when max skew 1 is exceeded for selector app=vllm-cpu
-
 ===== gateway tier =====
 
 $ kctl -n llm-gateway get all
-NAME                                    READY   STATUS    RESTARTS   AGE
-pod/llm-ingress-nginx-84bd78f64-2khg6   2/2     Running   0          3m48s
+NAME                                     READY   STATUS    RESTARTS        AGE
+pod/litellm-f8f86fdb5-p2hzm              1/1     Running   1 (5m18s ago)   5m58s
+pod/litellm-postgresql-0                 1/1     Running   0               5m58s
+pod/llm-ingress-nginx-786c5bf496-xtlrp   2/2     Running   0               29m
 
-NAME                           TYPE           CLUSTER-IP      EXTERNAL-IP                                                                          PORT(S)        AGE
-service/ai-gateway             ExternalName   <none>          envoy-llm-gateway-envoy-ai-gateway-3a17de18.envoy-gateway-system.svc.cluster.local   8080/TCP       63s
-service/llm-ingress-nginx      NodePort       10.96.219.235   <none>                                                                               80:30816/TCP   3m48s
-service/llm-ingress-nodeport   NodePort       10.96.150.48    <none>                                                                               80:30080/TCP   3m47s
+NAME                            TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)        AGE
+service/ai-gateway              ClusterIP   10.96.110.49    <none>        8080/TCP       4m47s
+service/litellm                 ClusterIP   10.96.68.212    <none>        8080/TCP       5m58s
+service/litellm-postgresql      ClusterIP   10.96.207.157   <none>        5432/TCP       5m58s
+service/litellm-postgresql-hl   ClusterIP   None            <none>        5432/TCP       5m58s
+service/llm-ingress-nginx       NodePort    10.96.78.29     <none>        80:30779/TCP   29m
+service/llm-ingress-nodeport    NodePort    10.96.41.79     <none>        80:30080/TCP   29m
 
 NAME                                READY   UP-TO-DATE   AVAILABLE   AGE
-deployment.apps/llm-ingress-nginx   1/1     1            1           3m48s
+deployment.apps/litellm             1/1     1            1           5m58s
+deployment.apps/llm-ingress-nginx   1/1     1            1           29m
 
-NAME                                          DESIRED   CURRENT   READY   AGE
-replicaset.apps/llm-ingress-nginx-84bd78f64   1         1         1       3m48s
+NAME                                           DESIRED   CURRENT   READY   AGE
+replicaset.apps/litellm-f8f86fdb5              1         1         1       5m58s
+replicaset.apps/llm-ingress-nginx-786c5bf496   1         1         1       29m
+
+NAME                                  READY   AGE
+statefulset.apps/litellm-postgresql   1/1     5m58s
 
 $ kctl -n llm-gateway get gateway,httproute -o wide
-NAME                                                 CLASS      ADDRESS         PROGRAMMED   AGE
-gateway.gateway.networking.k8s.io/envoy-ai-gateway   envoy-ai   10.96.105.126   True         65s
-gateway.gateway.networking.k8s.io/llm-ingress        nginx      10.96.219.235   True         3m48s
+NAME                                                 CLASS      ADDRESS       PROGRAMMED   AGE
+gateway.gateway.networking.k8s.io/envoy-ai-gateway   envoy-ai                 False        26m
+gateway.gateway.networking.k8s.io/llm-ingress        nginx      10.96.78.29   True         29m
 
 NAME                                                   HOSTNAMES   AGE
-httproute.gateway.networking.k8s.io/ai-gateway-route               3m48s
+httproute.gateway.networking.k8s.io/ai-gateway-route               29m
 
 ===== ingress tier =====
 
 $ kctl -n nginx-gateway get all
 NAME                                           READY   STATUS    RESTARTS   AGE
-pod/ngf-nginx-gateway-fabric-56dfc4fb5-cmk7s   1/1     Running   0          4m
+pod/ngf-nginx-gateway-fabric-56dfc4fb5-qz7jg   1/1     Running   0          29m
 
-NAME                               TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)   AGE
-service/ngf-nginx-gateway-fabric   ClusterIP   10.96.215.152   <none>        443/TCP   4m
+NAME                               TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)   AGE
+service/ngf-nginx-gateway-fabric   ClusterIP   10.96.21.231   <none>        443/TCP   29m
 
 NAME                                       READY   UP-TO-DATE   AVAILABLE   AGE
-deployment.apps/ngf-nginx-gateway-fabric   1/1     1            1           4m
+deployment.apps/ngf-nginx-gateway-fabric   1/1     1            1           29m
 
 NAME                                                 DESIRED   CURRENT   READY   AGE
-replicaset.apps/ngf-nginx-gateway-fabric-56dfc4fb5   1         1         1       4m
+replicaset.apps/ngf-nginx-gateway-fabric-56dfc4fb5   1         1         1       29m
 
 ===== gateway api =====
 
 $ kctl get gatewayclass
 NAME       CONTROLLER                                      ACCEPTED   AGE
-envoy-ai   gateway.envoyproxy.io/gatewayclass-controller   True       65s
-nginx      gateway.nginx.org/nginx-gateway-controller      True       4m
+envoy-ai   gateway.envoyproxy.io/gatewayclass-controller   True       26m
+nginx      gateway.nginx.org/nginx-gateway-controller      True       29m
 
 $ kctl get inferencepool -A
 NAMESPACE     NAME           AGE
-llm-serving   primary-pool   119s
+llm-serving   primary-pool   27m
 
 ===== recent events =====
 
 $ bash -c kubectl --context kind-llm-lab get events -A --sort-by=.lastTimestamp 2>/dev/null | tail -40
-envoy-gateway-system      90s         Normal    Pulled                    pod/envoy-gateway-7c999dc6f9-w9dc9                                  Container image "docker.io/envoyproxy/gateway:v1.5.6" already present on machine
-envoy-gateway-system      89s         Normal    LeaderElection            lease/5b9825d2.gateway.envoyproxy.io                                envoy-gateway-7c999dc6f9-w9dc9_fbf2180d-82b2-4fee-a674-08956a6005de became leader
-envoy-ai-gateway-system   75s         Normal    Scheduled                 pod/ai-gateway-controller-6cfbbf48bc-t58zm                          Successfully assigned envoy-ai-gateway-system/ai-gateway-controller-6cfbbf48bc-t58zm to llm-lab-control-plane
-envoy-ai-gateway-system   75s         Normal    SuccessfulCreate          replicaset/ai-gateway-controller-6cfbbf48bc                         Created pod: ai-gateway-controller-6cfbbf48bc-t58zm
-envoy-ai-gateway-system   75s         Normal    ScalingReplicaSet         deployment/ai-gateway-controller                                    Scaled up replica set ai-gateway-controller-6cfbbf48bc from 0 to 1
-envoy-ai-gateway-system   74s         Normal    Pulling                   pod/ai-gateway-controller-6cfbbf48bc-t58zm                          Pulling image "docker.io/envoyproxy/ai-gateway-controller:v1.0.0"
-envoy-ai-gateway-system   71s         Normal    Started                   pod/ai-gateway-controller-6cfbbf48bc-t58zm                          Started container ai-gateway-helm
-envoy-ai-gateway-system   71s         Normal    Created                   pod/ai-gateway-controller-6cfbbf48bc-t58zm                          Created container: ai-gateway-helm
-envoy-ai-gateway-system   71s         Normal    Pulled                    pod/ai-gateway-controller-6cfbbf48bc-t58zm                          Successfully pulled image "docker.io/envoyproxy/ai-gateway-controller:v1.0.0" in 2.798s (2.798s including waiting). Image size: 40277938 bytes.
-envoy-ai-gateway-system   70s         Normal    LeaderElection            lease/envoy-ai-gateway-controller                                   ai-gateway-controller-6cfbbf48bc-t58zm_a71b1f17-361e-4326-952e-39db5f7dc35c became leader
-envoy-gateway-system      65s         Normal    Scheduled                 pod/envoy-llm-gateway-envoy-ai-gateway-3a17de18-75f944594d-9z4fv    Successfully assigned envoy-gateway-system/envoy-llm-gateway-envoy-ai-gateway-3a17de18-75f944594d-9z4fv to llm-lab-control-plane
-envoy-gateway-system      65s         Normal    SuccessfulCreate          replicaset/envoy-llm-gateway-envoy-ai-gateway-3a17de18-75f944594d   Created pod: envoy-llm-gateway-envoy-ai-gateway-3a17de18-75f944594d-9z4fv
-envoy-gateway-system      65s         Normal    Scheduled                 pod/envoy-llm-gateway-envoy-ai-gateway-3a17de18-7cf5785799-dllzz    Successfully assigned envoy-gateway-system/envoy-llm-gateway-envoy-ai-gateway-3a17de18-7cf5785799-dllzz to llm-lab-control-plane
-envoy-gateway-system      65s         Normal    ScalingReplicaSet         deployment/envoy-llm-gateway-envoy-ai-gateway-3a17de18              Scaled up replica set envoy-llm-gateway-envoy-ai-gateway-3a17de18-7cf5785799 from 0 to 1
-envoy-gateway-system      65s         Normal    ScalingReplicaSet         deployment/envoy-llm-gateway-envoy-ai-gateway-3a17de18              Scaled up replica set envoy-llm-gateway-envoy-ai-gateway-3a17de18-75f944594d from 0 to 1
-envoy-gateway-system      65s         Normal    SuccessfulCreate          replicaset/envoy-llm-gateway-envoy-ai-gateway-3a17de18-7cf5785799   Created pod: envoy-llm-gateway-envoy-ai-gateway-3a17de18-7cf5785799-dllzz
-envoy-gateway-system      64s         Normal    Pulling                   pod/envoy-llm-gateway-envoy-ai-gateway-3a17de18-75f944594d-9z4fv    Pulling image "docker.io/envoyproxy/envoy:distroless-v1.35.7"
-envoy-gateway-system      64s         Normal    Pulling                   pod/envoy-llm-gateway-envoy-ai-gateway-3a17de18-7cf5785799-dllzz    Pulling image "docker.io/envoyproxy/ai-gateway-extproc:v1.0.0"
-envoy-gateway-system      62s         Normal    Pulled                    pod/envoy-llm-gateway-envoy-ai-gateway-3a17de18-7cf5785799-dllzz    Successfully pulled image "docker.io/envoyproxy/ai-gateway-extproc:v1.0.0" in 2.529s (2.529s including waiting). Image size: 31545269 bytes.
-envoy-gateway-system      62s         Normal    Created                   pod/envoy-llm-gateway-envoy-ai-gateway-3a17de18-7cf5785799-dllzz    Created container: ai-gateway-extproc
-envoy-gateway-system      62s         Normal    Started                   pod/envoy-llm-gateway-envoy-ai-gateway-3a17de18-7cf5785799-dllzz    Started container ai-gateway-extproc
-envoy-gateway-system      61s         Normal    Pulling                   pod/envoy-llm-gateway-envoy-ai-gateway-3a17de18-7cf5785799-dllzz    Pulling image "docker.io/envoyproxy/envoy:distroless-v1.35.7"
-envoy-gateway-system      59s         Normal    Started                   pod/envoy-llm-gateway-envoy-ai-gateway-3a17de18-75f944594d-9z4fv    Started container shutdown-manager
-envoy-gateway-system      59s         Normal    Pulled                    pod/envoy-llm-gateway-envoy-ai-gateway-3a17de18-7cf5785799-dllzz    Successfully pulled image "docker.io/envoyproxy/envoy:distroless-v1.35.7" in 522ms (2.678s including waiting). Image size: 35313048 bytes.
-envoy-gateway-system      59s         Normal    Started                   pod/envoy-llm-gateway-envoy-ai-gateway-3a17de18-7cf5785799-dllzz    Started container shutdown-manager
-envoy-gateway-system      59s         Normal    Created                   pod/envoy-llm-gateway-envoy-ai-gateway-3a17de18-7cf5785799-dllzz    Created container: shutdown-manager
-envoy-gateway-system      59s         Normal    Pulled                    pod/envoy-llm-gateway-envoy-ai-gateway-3a17de18-7cf5785799-dllzz    Container image "docker.io/envoyproxy/gateway:v1.5.6" already present on machine
-envoy-gateway-system      59s         Normal    Started                   pod/envoy-llm-gateway-envoy-ai-gateway-3a17de18-7cf5785799-dllzz    Started container envoy
-envoy-gateway-system      59s         Normal    Created                   pod/envoy-llm-gateway-envoy-ai-gateway-3a17de18-7cf5785799-dllzz    Created container: envoy
-envoy-gateway-system      59s         Normal    Created                   pod/envoy-llm-gateway-envoy-ai-gateway-3a17de18-75f944594d-9z4fv    Created container: shutdown-manager
-envoy-gateway-system      59s         Normal    Pulled                    pod/envoy-llm-gateway-envoy-ai-gateway-3a17de18-75f944594d-9z4fv    Successfully pulled image "docker.io/envoyproxy/envoy:distroless-v1.35.7" in 2.489s (5.014s including waiting). Image size: 35313048 bytes.
-envoy-gateway-system      59s         Normal    Pulled                    pod/envoy-llm-gateway-envoy-ai-gateway-3a17de18-75f944594d-9z4fv    Container image "docker.io/envoyproxy/gateway:v1.5.6" already present on machine
-envoy-gateway-system      59s         Normal    Started                   pod/envoy-llm-gateway-envoy-ai-gateway-3a17de18-75f944594d-9z4fv    Started container envoy
-envoy-gateway-system      59s         Normal    Created                   pod/envoy-llm-gateway-envoy-ai-gateway-3a17de18-75f944594d-9z4fv    Created container: envoy
-envoy-gateway-system      53s         Normal    SuccessfulDelete          replicaset/envoy-llm-gateway-envoy-ai-gateway-3a17de18-75f944594d   Deleted pod: envoy-llm-gateway-envoy-ai-gateway-3a17de18-75f944594d-9z4fv
-envoy-gateway-system      53s         Normal    ScalingReplicaSet         deployment/envoy-llm-gateway-envoy-ai-gateway-3a17de18              Scaled down replica set envoy-llm-gateway-envoy-ai-gateway-3a17de18-75f944594d from 1 to 0
-envoy-gateway-system      51s         Normal    Killing                   pod/envoy-llm-gateway-envoy-ai-gateway-3a17de18-75f944594d-9z4fv    Stopping container envoy
-envoy-gateway-system      51s         Normal    Killing                   pod/envoy-llm-gateway-envoy-ai-gateway-3a17de18-75f944594d-9z4fv    Stopping container shutdown-manager
-envoy-gateway-system      43s         Warning   Unhealthy                 pod/envoy-llm-gateway-envoy-ai-gateway-3a17de18-75f944594d-9z4fv    Readiness probe failed: HTTP probe failed with statuscode: 503
-envoy-gateway-system      40s         Warning   FailedPreStopHook         pod/envoy-llm-gateway-envoy-ai-gateway-3a17de18-75f944594d-9z4fv    PreStopHook failed
+llm-gateway               24m         Normal    Pulling                   pod/litellm-5cf8859496-6l499                                        Pulling image "ghcr.io/berriai/litellm:main-stable"
+envoy-gateway-system      24m         Warning   FailedPreStopHook         pod/envoy-llm-gateway-envoy-ai-gateway-3a17de18-5fd7c76764-smfc5    PreStopHook failed
+envoy-gateway-system      24m         Warning   FailedPreStopHook         pod/envoy-llm-gateway-envoy-ai-gateway-3a17de18-8489c95fdf-wr7jw    PreStopHook failed
+llm-gateway               24m         Normal    Started                   pod/litellm-5cf8859496-6l499                                        Started container litellm
+llm-gateway               24m         Normal    Created                   pod/litellm-5cf8859496-6l499                                        Created container: litellm
+llm-gateway               24m         Normal    Pulled                    pod/litellm-5cf8859496-6l499                                        Successfully pulled image "ghcr.io/berriai/litellm:main-stable" in 14.843s (14.843s including waiting). Image size: 381406370 bytes.
+llm-gateway               24m         Warning   Unhealthy                 pod/litellm-5cf8859496-6l499                                        Startup probe failed: Get "http://10.244.0.21:8080/health/readiness": dial tcp 10.244.0.21:8080: connect: connection refused
+envoy-gateway-system      24m         Warning   Unhealthy                 pod/envoy-llm-gateway-envoy-ai-gateway-3a17de18-5fd7c76764-smfc5    Readiness probe failed: Get "http://10.244.0.19:19002/healthz": dial tcp 10.244.0.19:19002: connect: connection refused
+envoy-gateway-system      24m         Warning   Unhealthy                 pod/envoy-llm-gateway-envoy-ai-gateway-3a17de18-5fd7c76764-smfc5    Readiness probe failed: Get "http://10.244.0.19:19003/ready": dial tcp 10.244.0.19:19003: connect: connection refused
+llm-serving               6m35s       Normal    Killing                   pod/vllm-cpu-65786c8f7d-zkwbl                                       Stopping container vllm
+llm-serving               6m35s       Normal    SuccessfulDelete          replicaset/vllm-cpu-65786c8f7d                                      Deleted pod: vllm-cpu-65786c8f7d-zkwbl
+llm-serving               6m35s       Normal    ScalingReplicaSet         deployment/vllm-cpu                                                 Scaled down replica set vllm-cpu-65786c8f7d from 1 to 0
+llm-gateway               6m1s        Normal    Killing                   pod/litellm-5cf8859496-6l499                                        Stopping container litellm
+llm-gateway               5m58s       Normal    Scheduled                 pod/litellm-f8f86fdb5-p2hzm                                         Successfully assigned llm-gateway/litellm-f8f86fdb5-p2hzm to llm-lab-control-plane
+llm-gateway               5m58s       Normal    Scheduled                 pod/litellm-migrations-pb47r                                        Successfully assigned llm-gateway/litellm-migrations-pb47r to llm-lab-control-plane
+llm-gateway               5m58s       Normal    ScalingReplicaSet         deployment/litellm                                                  Scaled up replica set litellm-f8f86fdb5 from 0 to 1
+llm-gateway               5m58s       Normal    SuccessfulCreate          statefulset/litellm-postgresql                                      create Pod litellm-postgresql-0 in StatefulSet litellm-postgresql successful
+llm-gateway               5m58s       Normal    SuccessfulCreate          statefulset/litellm-postgresql                                      create Claim data-litellm-postgresql-0 Pod litellm-postgresql-0 in StatefulSet litellm-postgresql success
+llm-gateway               5m58s       Normal    SuccessfulCreate          job/litellm-migrations                                              Created pod: litellm-migrations-pb47r
+llm-gateway               5m58s       Normal    Provisioning              persistentvolumeclaim/data-litellm-postgresql-0                     External provisioner is provisioning volume for claim "llm-gateway/data-litellm-postgresql-0"
+llm-gateway               5m58s       Normal    ExternalProvisioning      persistentvolumeclaim/data-litellm-postgresql-0                     Waiting for a volume to be created either by the external provisioner 'rancher.io/local-path' or manually by the system administrator. If volume creation is delayed, please verify that the provisioner is running and correctly registered.
+llm-gateway               5m58s       Normal    WaitForFirstConsumer      persistentvolumeclaim/data-litellm-postgresql-0                     waiting for first consumer to be created before binding
+llm-gateway               5m58s       Normal    Pulled                    pod/litellm-migrations-pb47r                                        Container image "ghcr.io/berriai/litellm:main-stable" already present on machine
+llm-gateway               5m58s       Normal    SuccessfulCreate          replicaset/litellm-f8f86fdb5                                        Created pod: litellm-f8f86fdb5-p2hzm
+local-path-storage        5m57s       Normal    Started                   pod/helper-pod-create-pvc-af2784ce-7d65-41ea-8388-f92ad0231c07      Started container helper-pod
+local-path-storage        5m57s       Normal    Created                   pod/helper-pod-create-pvc-af2784ce-7d65-41ea-8388-f92ad0231c07      Created container: helper-pod
+local-path-storage        5m57s       Normal    Pulled                    pod/helper-pod-create-pvc-af2784ce-7d65-41ea-8388-f92ad0231c07      Container image "docker.io/kindest/local-path-helper:v20241212-8ac705d0" already present on machine
+llm-gateway               5m57s       Normal    Created                   pod/litellm-migrations-pb47r                                        Created container: prisma-migrations
+llm-gateway               5m57s       Normal    Started                   pod/litellm-migrations-pb47r                                        Started container prisma-migrations
+llm-gateway               5m56s       Normal    ProvisioningSucceeded     persistentvolumeclaim/data-litellm-postgresql-0                     Successfully provisioned volume pvc-af2784ce-7d65-41ea-8388-f92ad0231c07
+llm-gateway               5m55s       Normal    Scheduled                 pod/litellm-postgresql-0                                            Successfully assigned llm-gateway/litellm-postgresql-0 to llm-lab-control-plane
+llm-gateway               5m54s       Normal    Pulling                   pod/litellm-postgresql-0                                            Pulling image "docker.io/bitnamilegacy/postgresql:16.2.0-debian-12-r6"
+llm-gateway               5m43s       Normal    Pulled                    pod/litellm-postgresql-0                                            Successfully pulled image "docker.io/bitnamilegacy/postgresql:16.2.0-debian-12-r6" in 11.575s (11.575s including waiting). Image size: 277055256 bytes.
+llm-gateway               5m43s       Normal    Created                   pod/litellm-postgresql-0                                            Created container: postgresql
+llm-gateway               5m43s       Normal    Started                   pod/litellm-postgresql-0                                            Started container postgresql
+llm-gateway               5m20s       Normal    Completed                 job/litellm-migrations                                              Job completed
+llm-gateway               5m17s       Normal    Pulled                    pod/litellm-f8f86fdb5-p2hzm                                         Container image "ghcr.io/berriai/litellm:main-stable" already present on machine
+llm-gateway               5m17s       Normal    Created                   pod/litellm-f8f86fdb5-p2hzm                                         Created container: litellm
+llm-gateway               5m17s       Normal    Started                   pod/litellm-f8f86fdb5-p2hzm                                         Started container litellm
+llm-gateway               4m58s       Warning   Unhealthy                 pod/litellm-f8f86fdb5-p2hzm                                         Startup probe failed: Get "http://10.244.0.22:8080/health/readiness": dial tcp 10.244.0.22:8080: connect: connection refused
+
+===== jobs (schema migrations) =====
+
+$ kctl -n llm-gateway get jobs -o wide
+No resources found in llm-gateway namespace.
+
+$ kctl -n llm-gateway describe jobs
+No resources found in llm-gateway namespace.
+
+$ bash -c kubectl --context kind-llm-lab -n llm-gateway logs -l job-name --tail=60 --all-containers 2>&1 | tail -80
+No resources found in llm-gateway namespace.
+
+===== litellm + postgres pods =====
+
+$ bash -c kubectl --context kind-llm-lab -n llm-gateway get pods -o wide 2>&1
+NAME                                 READY   STATUS    RESTARTS        AGE     IP            NODE                    NOMINATED NODE   READINESS GATES
+litellm-f8f86fdb5-p2hzm              1/1     Running   1 (5m18s ago)   5m58s   10.244.0.22   llm-lab-control-plane   <none>           <none>
+litellm-postgresql-0                 1/1     Running   0               5m58s   10.244.0.25   llm-lab-control-plane   <none>           <none>
+llm-ingress-nginx-786c5bf496-xtlrp   2/2     Running   0               29m     10.244.0.7    llm-lab-control-plane   <none>           <none>
+
+$ bash -c kubectl --context kind-llm-lab -n llm-gateway logs -l app.kubernetes.io/name=postgresql --tail=30 2>&1
+	    SELECT reltuples::BIGINT
+	    FROM pg_class
+	    WHERE oid = '"LiteLLM_SpendLogs"'::regclass;
+	    
+2026-08-13 19:55:44.935 GMT [200] ERROR:  relation "public.LiteLLM_UserTable" does not exist at character 1114
+2026-08-13 19:55:44.935 GMT [200] STATEMENT:  SELECT "public"."LiteLLM_UserTable"."user_id", "public"."LiteLLM_UserTable"."user_alias", "public"."LiteLLM_UserTable"."team_id", "public"."LiteLLM_UserTable"."sso_user_id", "public"."LiteLLM_UserTable"."organization_id", "public"."LiteLLM_UserTable"."object_permission_id", "public"."LiteLLM_UserTable"."password", "public"."LiteLLM_UserTable"."teams", "public"."LiteLLM_UserTable"."user_role", "public"."LiteLLM_UserTable"."max_budget", "public"."LiteLLM_UserTable"."spend", "public"."LiteLLM_UserTable"."user_email", "public"."LiteLLM_UserTable"."models", "public"."LiteLLM_UserTable"."metadata", "public"."LiteLLM_UserTable"."max_parallel_requests", "public"."LiteLLM_UserTable"."tpm_limit", "public"."LiteLLM_UserTable"."rpm_limit", "public"."LiteLLM_UserTable"."budget_duration", "public"."LiteLLM_UserTable"."budget_reset_at", "public"."LiteLLM_UserTable"."allowed_cache_controls", "public"."LiteLLM_UserTable"."policies", "public"."LiteLLM_UserTable"."model_spend", "public"."LiteLLM_UserTable"."model_max_budget", "public"."LiteLLM_UserTable"."created_at", "public"."LiteLLM_UserTable"."updated_at" FROM "public"."LiteLLM_UserTable" WHERE ("public"."LiteLLM_UserTable"."user_id" = $1 AND 1=1) LIMIT $2 OFFSET $3 /* traceparent=00-00000000000000000000000000000000-0000000000000000-01 */
+2026-08-13 19:56:05.426 GMT [200] ERROR:  relation "public.LiteLLM_MCPServerTable" does not exist at character 2702
+2026-08-13 19:56:05.426 GMT [200] STATEMENT:  SELECT "public"."LiteLLM_MCPServerTable"."server_id", "public"."LiteLLM_MCPServerTable"."server_name", "public"."LiteLLM_MCPServerTable"."alias", "public"."LiteLLM_MCPServerTable"."description", "public"."LiteLLM_MCPServerTable"."instructions", "public"."LiteLLM_MCPServerTable"."url", "public"."LiteLLM_MCPServerTable"."spec_path", "public"."LiteLLM_MCPServerTable"."transport", "public"."LiteLLM_MCPServerTable"."auth_type", "public"."LiteLLM_MCPServerTable"."credentials", "public"."LiteLLM_MCPServerTable"."created_at", "public"."LiteLLM_MCPServerTable"."created_by", "public"."LiteLLM_MCPServerTable"."updated_at", "public"."LiteLLM_MCPServerTable"."updated_by", "public"."LiteLLM_MCPServerTable"."mcp_info", "public"."LiteLLM_MCPServerTable"."mcp_access_groups", "public"."LiteLLM_MCPServerTable"."allowed_tools", "public"."LiteLLM_MCPServerTable"."tool_name_to_display_name", "public"."LiteLLM_MCPServerTable"."tool_name_to_description", "public"."LiteLLM_MCPServerTable"."extra_headers", "public"."LiteLLM_MCPServerTable"."static_headers", "public"."LiteLLM_MCPServerTable"."env_vars", "public"."LiteLLM_MCPServerTable"."status", "public"."LiteLLM_MCPServerTable"."last_health_check", "public"."LiteLLM_MCPServerTable"."health_check_error", "public"."LiteLLM_MCPServerTable"."command", "public"."LiteLLM_MCPServerTable"."args", "public"."LiteLLM_MCPServerTable"."env", "public"."LiteLLM_MCPServerTable"."issuer", "public"."LiteLLM_MCPServerTable"."authorization_url", "public"."LiteLLM_MCPServerTable"."token_url", "public"."LiteLLM_MCPServerTable"."registration_url", "public"."LiteLLM_MCPServerTable"."oauth2_flow", "public"."LiteLLM_MCPServerTable"."token_exchange_endpoint", "public"."LiteLLM_MCPServerTable"."audience", "public"."LiteLLM_MCPServerTable"."subject_token_type", "public"."LiteLLM_MCPServerTable"."token_exchange_profile", "public"."LiteLLM_MCPServerTable"."allow_all_keys", "public"."LiteLLM_MCPServerTable"."available_on_public_internet", "public"."LiteLLM_MCPServerTable"."delegate_auth_to_upstream", "public"."LiteLLM_MCPServerTable"."oauth_passthrough", "public"."LiteLLM_MCPServerTable"."dcr_bridge", "public"."LiteLLM_MCPServerTable"."is_byok", "public"."LiteLLM_MCPServerTable"."byok_description", "public"."LiteLLM_MCPServerTable"."byok_api_key_help_url", "public"."LiteLLM_MCPServerTable"."source_url", "public"."LiteLLM_MCPServerTable"."timeout", "public"."LiteLLM_MCPServerTable"."max_concurrent_requests", "public"."LiteLLM_MCPServerTable"."approval_status", "public"."LiteLLM_MCPServerTable"."submitted_by", "public"."LiteLLM_MCPServerTable"."submitted_at", "public"."LiteLLM_MCPServerTable"."reviewed_at", "public"."LiteLLM_MCPServerTable"."review_notes" FROM "public"."LiteLLM_MCPServerTable" WHERE ("public"."LiteLLM_MCPServerTable"."approval_status" IS NULL OR "public"."LiteLLM_MCPServerTable"."approval_status" IN ($1,$2)) OFFSET $3 /* traceparent=00-00000000000000000000000000000000-0000000000000000-01 */
+2026-08-13 19:56:17.532 GMT [200] ERROR:  relation "public.LiteLLM_UISettings" does not exist at character 181
+2026-08-13 19:56:17.532 GMT [200] STATEMENT:  SELECT "public"."LiteLLM_UISettings"."id", "public"."LiteLLM_UISettings"."ui_settings", "public"."LiteLLM_UISettings"."created_at", "public"."LiteLLM_UISettings"."updated_at" FROM "public"."LiteLLM_UISettings" WHERE ("public"."LiteLLM_UISettings"."id" = $1 AND 1=1) LIMIT $2 OFFSET $3 /* traceparent=00-00000000000000000000000000000000-0000000000000000-01 */
+2026-08-13 19:56:34.926 GMT [200] ERROR:  relation "public.LiteLLM_MCPServerTable" does not exist at character 2702
+2026-08-13 19:56:34.926 GMT [200] STATEMENT:  SELECT "public"."LiteLLM_MCPServerTable"."server_id", "public"."LiteLLM_MCPServerTable"."server_name", "public"."LiteLLM_MCPServerTable"."alias", "public"."LiteLLM_MCPServerTable"."description", "public"."LiteLLM_MCPServerTable"."instructions", "public"."LiteLLM_MCPServerTable"."url", "public"."LiteLLM_MCPServerTable"."spec_path", "public"."LiteLLM_MCPServerTable"."transport", "public"."LiteLLM_MCPServerTable"."auth_type", "public"."LiteLLM_MCPServerTable"."credentials", "public"."LiteLLM_MCPServerTable"."created_at", "public"."LiteLLM_MCPServerTable"."created_by", "public"."LiteLLM_MCPServerTable"."updated_at", "public"."LiteLLM_MCPServerTable"."updated_by", "public"."LiteLLM_MCPServerTable"."mcp_info", "public"."LiteLLM_MCPServerTable"."mcp_access_groups", "public"."LiteLLM_MCPServerTable"."allowed_tools", "public"."LiteLLM_MCPServerTable"."tool_name_to_display_name", "public"."LiteLLM_MCPServerTable"."tool_name_to_description", "public"."LiteLLM_MCPServerTable"."extra_headers", "public"."LiteLLM_MCPServerTable"."static_headers", "public"."LiteLLM_MCPServerTable"."env_vars", "public"."LiteLLM_MCPServerTable"."status", "public"."LiteLLM_MCPServerTable"."last_health_check", "public"."LiteLLM_MCPServerTable"."health_check_error", "public"."LiteLLM_MCPServerTable"."command", "public"."LiteLLM_MCPServerTable"."args", "public"."LiteLLM_MCPServerTable"."env", "public"."LiteLLM_MCPServerTable"."issuer", "public"."LiteLLM_MCPServerTable"."authorization_url", "public"."LiteLLM_MCPServerTable"."token_url", "public"."LiteLLM_MCPServerTable"."registration_url", "public"."LiteLLM_MCPServerTable"."oauth2_flow", "public"."LiteLLM_MCPServerTable"."token_exchange_endpoint", "public"."LiteLLM_MCPServerTable"."audience", "public"."LiteLLM_MCPServerTable"."subject_token_type", "public"."LiteLLM_MCPServerTable"."token_exchange_profile", "public"."LiteLLM_MCPServerTable"."allow_all_keys", "public"."LiteLLM_MCPServerTable"."available_on_public_internet", "public"."LiteLLM_MCPServerTable"."delegate_auth_to_upstream", "public"."LiteLLM_MCPServerTable"."oauth_passthrough", "public"."LiteLLM_MCPServerTable"."dcr_bridge", "public"."LiteLLM_MCPServerTable"."is_byok", "public"."LiteLLM_MCPServerTable"."byok_description", "public"."LiteLLM_MCPServerTable"."byok_api_key_help_url", "public"."LiteLLM_MCPServerTable"."source_url", "public"."LiteLLM_MCPServerTable"."timeout", "public"."LiteLLM_MCPServerTable"."max_concurrent_requests", "public"."LiteLLM_MCPServerTable"."approval_status", "public"."LiteLLM_MCPServerTable"."submitted_by", "public"."LiteLLM_MCPServerTable"."submitted_at", "public"."LiteLLM_MCPServerTable"."reviewed_at", "public"."LiteLLM_MCPServerTable"."review_notes" FROM "public"."LiteLLM_MCPServerTable" WHERE ("public"."LiteLLM_MCPServerTable"."approval_status" IS NULL OR "public"."LiteLLM_MCPServerTable"."approval_status" IN ($1,$2)) OFFSET $3 /* traceparent=00-00000000000000000000000000000000-0000000000000000-01 */
+2026-08-13 19:56:39.916 GMT [200] ERROR:  relation "public.LiteLLM_UserTable" does not exist at character 1114
+2026-08-13 19:56:39.916 GMT [200] STATEMENT:  SELECT "public"."LiteLLM_UserTable"."user_id", "public"."LiteLLM_UserTable"."user_alias", "public"."LiteLLM_UserTable"."team_id", "public"."LiteLLM_UserTable"."sso_user_id", "public"."LiteLLM_UserTable"."organization_id", "public"."LiteLLM_UserTable"."object_permission_id", "public"."LiteLLM_UserTable"."password", "public"."LiteLLM_UserTable"."teams", "public"."LiteLLM_UserTable"."user_role", "public"."LiteLLM_UserTable"."max_budget", "public"."LiteLLM_UserTable"."spend", "public"."LiteLLM_UserTable"."user_email", "public"."LiteLLM_UserTable"."models", "public"."LiteLLM_UserTable"."metadata", "public"."LiteLLM_UserTable"."max_parallel_requests", "public"."LiteLLM_UserTable"."tpm_limit", "public"."LiteLLM_UserTable"."rpm_limit", "public"."LiteLLM_UserTable"."budget_duration", "public"."LiteLLM_UserTable"."budget_reset_at", "public"."LiteLLM_UserTable"."allowed_cache_controls", "public"."LiteLLM_UserTable"."policies", "public"."LiteLLM_UserTable"."model_spend", "public"."LiteLLM_UserTable"."model_max_budget", "public"."LiteLLM_UserTable"."created_at", "public"."LiteLLM_UserTable"."updated_at" FROM "public"."LiteLLM_UserTable" WHERE "public"."LiteLLM_UserTable"."user_email" ILIKE $1 LIMIT $2 OFFSET $3 /* traceparent=00-00000000000000000000000000000000-0000000000000000-01 */
+2026-08-13 19:57:04.932 GMT [200] ERROR:  relation "public.LiteLLM_MCPServerTable" does not exist at character 2702
+2026-08-13 19:57:04.932 GMT [200] STATEMENT:  SELECT "public"."LiteLLM_MCPServerTable"."server_id", "public"."LiteLLM_MCPServerTable"."server_name", "public"."LiteLLM_MCPServerTable"."alias", "public"."LiteLLM_MCPServerTable"."description", "public"."LiteLLM_MCPServerTable"."instructions", "public"."LiteLLM_MCPServerTable"."url", "public"."LiteLLM_MCPServerTable"."spec_path", "public"."LiteLLM_MCPServerTable"."transport", "public"."LiteLLM_MCPServerTable"."auth_type", "public"."LiteLLM_MCPServerTable"."credentials", "public"."LiteLLM_MCPServerTable"."created_at", "public"."LiteLLM_MCPServerTable"."created_by", "public"."LiteLLM_MCPServerTable"."updated_at", "public"."LiteLLM_MCPServerTable"."updated_by", "public"."LiteLLM_MCPServerTable"."mcp_info", "public"."LiteLLM_MCPServerTable"."mcp_access_groups", "public"."LiteLLM_MCPServerTable"."allowed_tools", "public"."LiteLLM_MCPServerTable"."tool_name_to_display_name", "public"."LiteLLM_MCPServerTable"."tool_name_to_description", "public"."LiteLLM_MCPServerTable"."extra_headers", "public"."LiteLLM_MCPServerTable"."static_headers", "public"."LiteLLM_MCPServerTable"."env_vars", "public"."LiteLLM_MCPServerTable"."status", "public"."LiteLLM_MCPServerTable"."last_health_check", "public"."LiteLLM_MCPServerTable"."health_check_error", "public"."LiteLLM_MCPServerTable"."command", "public"."LiteLLM_MCPServerTable"."args", "public"."LiteLLM_MCPServerTable"."env", "public"."LiteLLM_MCPServerTable"."issuer", "public"."LiteLLM_MCPServerTable"."authorization_url", "public"."LiteLLM_MCPServerTable"."token_url", "public"."LiteLLM_MCPServerTable"."registration_url", "public"."LiteLLM_MCPServerTable"."oauth2_flow", "public"."LiteLLM_MCPServerTable"."token_exchange_endpoint", "public"."LiteLLM_MCPServerTable"."audience", "public"."LiteLLM_MCPServerTable"."subject_token_type", "public"."LiteLLM_MCPServerTable"."token_exchange_profile", "public"."LiteLLM_MCPServerTable"."allow_all_keys", "public"."LiteLLM_MCPServerTable"."available_on_public_internet", "public"."LiteLLM_MCPServerTable"."delegate_auth_to_upstream", "public"."LiteLLM_MCPServerTable"."oauth_passthrough", "public"."LiteLLM_MCPServerTable"."dcr_bridge", "public"."LiteLLM_MCPServerTable"."is_byok", "public"."LiteLLM_MCPServerTable"."byok_description", "public"."LiteLLM_MCPServerTable"."byok_api_key_help_url", "public"."LiteLLM_MCPServerTable"."source_url", "public"."LiteLLM_MCPServerTable"."timeout", "public"."LiteLLM_MCPServerTable"."max_concurrent_requests", "public"."LiteLLM_MCPServerTable"."approval_status", "public"."LiteLLM_MCPServerTable"."submitted_by", "public"."LiteLLM_MCPServerTable"."submitted_at", "public"."LiteLLM_MCPServerTable"."reviewed_at", "public"."LiteLLM_MCPServerTable"."review_notes" FROM "public"."LiteLLM_MCPServerTable" WHERE ("public"."LiteLLM_MCPServerTable"."approval_status" IS NULL OR "public"."LiteLLM_MCPServerTable"."approval_status" IN ($1,$2)) OFFSET $3 /* traceparent=00-00000000000000000000000000000000-0000000000000000-01 */
+2026-08-13 19:57:34.938 GMT [200] ERROR:  relation "public.LiteLLM_MCPServerTable" does not exist at character 2702
+2026-08-13 19:57:34.938 GMT [200] STATEMENT:  SELECT "public"."LiteLLM_MCPServerTable"."server_id", "public"."LiteLLM_MCPServerTable"."server_name", "public"."LiteLLM_MCPServerTable"."alias", "public"."LiteLLM_MCPServerTable"."description", "public"."LiteLLM_MCPServerTable"."instructions", "public"."LiteLLM_MCPServerTable"."url", "public"."LiteLLM_MCPServerTable"."spec_path", "public"."LiteLLM_MCPServerTable"."transport", "public"."LiteLLM_MCPServerTable"."auth_type", "public"."LiteLLM_MCPServerTable"."credentials", "public"."LiteLLM_MCPServerTable"."created_at", "public"."LiteLLM_MCPServerTable"."created_by", "public"."LiteLLM_MCPServerTable"."updated_at", "public"."LiteLLM_MCPServerTable"."updated_by", "public"."LiteLLM_MCPServerTable"."mcp_info", "public"."LiteLLM_MCPServerTable"."mcp_access_groups", "public"."LiteLLM_MCPServerTable"."allowed_tools", "public"."LiteLLM_MCPServerTable"."tool_name_to_display_name", "public"."LiteLLM_MCPServerTable"."tool_name_to_description", "public"."LiteLLM_MCPServerTable"."extra_headers", "public"."LiteLLM_MCPServerTable"."static_headers", "public"."LiteLLM_MCPServerTable"."env_vars", "public"."LiteLLM_MCPServerTable"."status", "public"."LiteLLM_MCPServerTable"."last_health_check", "public"."LiteLLM_MCPServerTable"."health_check_error", "public"."LiteLLM_MCPServerTable"."command", "public"."LiteLLM_MCPServerTable"."args", "public"."LiteLLM_MCPServerTable"."env", "public"."LiteLLM_MCPServerTable"."issuer", "public"."LiteLLM_MCPServerTable"."authorization_url", "public"."LiteLLM_MCPServerTable"."token_url", "public"."LiteLLM_MCPServerTable"."registration_url", "public"."LiteLLM_MCPServerTable"."oauth2_flow", "public"."LiteLLM_MCPServerTable"."token_exchange_endpoint", "public"."LiteLLM_MCPServerTable"."audience", "public"."LiteLLM_MCPServerTable"."subject_token_type", "public"."LiteLLM_MCPServerTable"."token_exchange_profile", "public"."LiteLLM_MCPServerTable"."allow_all_keys", "public"."LiteLLM_MCPServerTable"."available_on_public_internet", "public"."LiteLLM_MCPServerTable"."delegate_auth_to_upstream", "public"."LiteLLM_MCPServerTable"."oauth_passthrough", "public"."LiteLLM_MCPServerTable"."dcr_bridge", "public"."LiteLLM_MCPServerTable"."is_byok", "public"."LiteLLM_MCPServerTable"."byok_description", "public"."LiteLLM_MCPServerTable"."byok_api_key_help_url", "public"."LiteLLM_MCPServerTable"."source_url", "public"."LiteLLM_MCPServerTable"."timeout", "public"."LiteLLM_MCPServerTable"."max_concurrent_requests", "public"."LiteLLM_MCPServerTable"."approval_status", "public"."LiteLLM_MCPServerTable"."submitted_by", "public"."LiteLLM_MCPServerTable"."submitted_at", "public"."LiteLLM_MCPServerTable"."reviewed_at", "public"."LiteLLM_MCPServerTable"."review_notes" FROM "public"."LiteLLM_MCPServerTable" WHERE ("public"."LiteLLM_MCPServerTable"."approval_status" IS NULL OR "public"."LiteLLM_MCPServerTable"."approval_status" IN ($1,$2)) OFFSET $3 /* traceparent=00-00000000000000000000000000000000-0000000000000000-01 */
+2026-08-13 19:58:04.932 GMT [200] ERROR:  relation "public.LiteLLM_MCPServerTable" does not exist at character 2702
+2026-08-13 19:58:04.932 GMT [200] STATEMENT:  SELECT "public"."LiteLLM_MCPServerTable"."server_id", "public"."LiteLLM_MCPServerTable"."server_name", "public"."LiteLLM_MCPServerTable"."alias", "public"."LiteLLM_MCPServerTable"."description", "public"."LiteLLM_MCPServerTable"."instructions", "public"."LiteLLM_MCPServerTable"."url", "public"."LiteLLM_MCPServerTable"."spec_path", "public"."LiteLLM_MCPServerTable"."transport", "public"."LiteLLM_MCPServerTable"."auth_type", "public"."LiteLLM_MCPServerTable"."credentials", "public"."LiteLLM_MCPServerTable"."created_at", "public"."LiteLLM_MCPServerTable"."created_by", "public"."LiteLLM_MCPServerTable"."updated_at", "public"."LiteLLM_MCPServerTable"."updated_by", "public"."LiteLLM_MCPServerTable"."mcp_info", "public"."LiteLLM_MCPServerTable"."mcp_access_groups", "public"."LiteLLM_MCPServerTable"."allowed_tools", "public"."LiteLLM_MCPServerTable"."tool_name_to_display_name", "public"."LiteLLM_MCPServerTable"."tool_name_to_description", "public"."LiteLLM_MCPServerTable"."extra_headers", "public"."LiteLLM_MCPServerTable"."static_headers", "public"."LiteLLM_MCPServerTable"."env_vars", "public"."LiteLLM_MCPServerTable"."status", "public"."LiteLLM_MCPServerTable"."last_health_check", "public"."LiteLLM_MCPServerTable"."health_check_error", "public"."LiteLLM_MCPServerTable"."command", "public"."LiteLLM_MCPServerTable"."args", "public"."LiteLLM_MCPServerTable"."env", "public"."LiteLLM_MCPServerTable"."issuer", "public"."LiteLLM_MCPServerTable"."authorization_url", "public"."LiteLLM_MCPServerTable"."token_url", "public"."LiteLLM_MCPServerTable"."registration_url", "public"."LiteLLM_MCPServerTable"."oauth2_flow", "public"."LiteLLM_MCPServerTable"."token_exchange_endpoint", "public"."LiteLLM_MCPServerTable"."audience", "public"."LiteLLM_MCPServerTable"."subject_token_type", "public"."LiteLLM_MCPServerTable"."token_exchange_profile", "public"."LiteLLM_MCPServerTable"."allow_all_keys", "public"."LiteLLM_MCPServerTable"."available_on_public_internet", "public"."LiteLLM_MCPServerTable"."delegate_auth_to_upstream", "public"."LiteLLM_MCPServerTable"."oauth_passthrough", "public"."LiteLLM_MCPServerTable"."dcr_bridge", "public"."LiteLLM_MCPServerTable"."is_byok", "public"."LiteLLM_MCPServerTable"."byok_description", "public"."LiteLLM_MCPServerTable"."byok_api_key_help_url", "public"."LiteLLM_MCPServerTable"."source_url", "public"."LiteLLM_MCPServerTable"."timeout", "public"."LiteLLM_MCPServerTable"."max_concurrent_requests", "public"."LiteLLM_MCPServerTable"."approval_status", "public"."LiteLLM_MCPServerTable"."submitted_by", "public"."LiteLLM_MCPServerTable"."submitted_at", "public"."LiteLLM_MCPServerTable"."reviewed_at", "public"."LiteLLM_MCPServerTable"."review_notes" FROM "public"."LiteLLM_MCPServerTable" WHERE ("public"."LiteLLM_MCPServerTable"."approval_status" IS NULL OR "public"."LiteLLM_MCPServerTable"."approval_status" IN ($1,$2)) OFFSET $3 /* traceparent=00-00000000000000000000000000000000-0000000000000000-01 */
+2026-08-13 19:58:34.933 GMT [200] ERROR:  relation "public.LiteLLM_MCPServerTable" does not exist at character 2702
+2026-08-13 19:58:34.933 GMT [200] STATEMENT:  SELECT "public"."LiteLLM_MCPServerTable"."server_id", "public"."LiteLLM_MCPServerTable"."server_name", "public"."LiteLLM_MCPServerTable"."alias", "public"."LiteLLM_MCPServerTable"."description", "public"."LiteLLM_MCPServerTable"."instructions", "public"."LiteLLM_MCPServerTable"."url", "public"."LiteLLM_MCPServerTable"."spec_path", "public"."LiteLLM_MCPServerTable"."transport", "public"."LiteLLM_MCPServerTable"."auth_type", "public"."LiteLLM_MCPServerTable"."credentials", "public"."LiteLLM_MCPServerTable"."created_at", "public"."LiteLLM_MCPServerTable"."created_by", "public"."LiteLLM_MCPServerTable"."updated_at", "public"."LiteLLM_MCPServerTable"."updated_by", "public"."LiteLLM_MCPServerTable"."mcp_info", "public"."LiteLLM_MCPServerTable"."mcp_access_groups", "public"."LiteLLM_MCPServerTable"."allowed_tools", "public"."LiteLLM_MCPServerTable"."tool_name_to_display_name", "public"."LiteLLM_MCPServerTable"."tool_name_to_description", "public"."LiteLLM_MCPServerTable"."extra_headers", "public"."LiteLLM_MCPServerTable"."static_headers", "public"."LiteLLM_MCPServerTable"."env_vars", "public"."LiteLLM_MCPServerTable"."status", "public"."LiteLLM_MCPServerTable"."last_health_check", "public"."LiteLLM_MCPServerTable"."health_check_error", "public"."LiteLLM_MCPServerTable"."command", "public"."LiteLLM_MCPServerTable"."args", "public"."LiteLLM_MCPServerTable"."env", "public"."LiteLLM_MCPServerTable"."issuer", "public"."LiteLLM_MCPServerTable"."authorization_url", "public"."LiteLLM_MCPServerTable"."token_url", "public"."LiteLLM_MCPServerTable"."registration_url", "public"."LiteLLM_MCPServerTable"."oauth2_flow", "public"."LiteLLM_MCPServerTable"."token_exchange_endpoint", "public"."LiteLLM_MCPServerTable"."audience", "public"."LiteLLM_MCPServerTable"."subject_token_type", "public"."LiteLLM_MCPServerTable"."token_exchange_profile", "public"."LiteLLM_MCPServerTable"."allow_all_keys", "public"."LiteLLM_MCPServerTable"."available_on_public_internet", "public"."LiteLLM_MCPServerTable"."delegate_auth_to_upstream", "public"."LiteLLM_MCPServerTable"."oauth_passthrough", "public"."LiteLLM_MCPServerTable"."dcr_bridge", "public"."LiteLLM_MCPServerTable"."is_byok", "public"."LiteLLM_MCPServerTable"."byok_description", "public"."LiteLLM_MCPServerTable"."byok_api_key_help_url", "public"."LiteLLM_MCPServerTable"."source_url", "public"."LiteLLM_MCPServerTable"."timeout", "public"."LiteLLM_MCPServerTable"."max_concurrent_requests", "public"."LiteLLM_MCPServerTable"."approval_status", "public"."LiteLLM_MCPServerTable"."submitted_by", "public"."LiteLLM_MCPServerTable"."submitted_at", "public"."LiteLLM_MCPServerTable"."reviewed_at", "public"."LiteLLM_MCPServerTable"."review_notes" FROM "public"."LiteLLM_MCPServerTable" WHERE ("public"."LiteLLM_MCPServerTable"."approval_status" IS NULL OR "public"."LiteLLM_MCPServerTable"."approval_status" IN ($1,$2)) OFFSET $3 /* traceparent=00-00000000000000000000000000000000-0000000000000000-01 */
+2026-08-13 19:59:04.939 GMT [200] ERROR:  relation "public.LiteLLM_MCPServerTable" does not exist at character 2702
+2026-08-13 19:59:04.939 GMT [200] STATEMENT:  SELECT "public"."LiteLLM_MCPServerTable"."server_id", "public"."LiteLLM_MCPServerTable"."server_name", "public"."LiteLLM_MCPServerTable"."alias", "public"."LiteLLM_MCPServerTable"."description", "public"."LiteLLM_MCPServerTable"."instructions", "public"."LiteLLM_MCPServerTable"."url", "public"."LiteLLM_MCPServerTable"."spec_path", "public"."LiteLLM_MCPServerTable"."transport", "public"."LiteLLM_MCPServerTable"."auth_type", "public"."LiteLLM_MCPServerTable"."credentials", "public"."LiteLLM_MCPServerTable"."created_at", "public"."LiteLLM_MCPServerTable"."created_by", "public"."LiteLLM_MCPServerTable"."updated_at", "public"."LiteLLM_MCPServerTable"."updated_by", "public"."LiteLLM_MCPServerTable"."mcp_info", "public"."LiteLLM_MCPServerTable"."mcp_access_groups", "public"."LiteLLM_MCPServerTable"."allowed_tools", "public"."LiteLLM_MCPServerTable"."tool_name_to_display_name", "public"."LiteLLM_MCPServerTable"."tool_name_to_description", "public"."LiteLLM_MCPServerTable"."extra_headers", "public"."LiteLLM_MCPServerTable"."static_headers", "public"."LiteLLM_MCPServerTable"."env_vars", "public"."LiteLLM_MCPServerTable"."status", "public"."LiteLLM_MCPServerTable"."last_health_check", "public"."LiteLLM_MCPServerTable"."health_check_error", "public"."LiteLLM_MCPServerTable"."command", "public"."LiteLLM_MCPServerTable"."args", "public"."LiteLLM_MCPServerTable"."env", "public"."LiteLLM_MCPServerTable"."issuer", "public"."LiteLLM_MCPServerTable"."authorization_url", "public"."LiteLLM_MCPServerTable"."token_url", "public"."LiteLLM_MCPServerTable"."registration_url", "public"."LiteLLM_MCPServerTable"."oauth2_flow", "public"."LiteLLM_MCPServerTable"."token_exchange_endpoint", "public"."LiteLLM_MCPServerTable"."audience", "public"."LiteLLM_MCPServerTable"."subject_token_type", "public"."LiteLLM_MCPServerTable"."token_exchange_profile", "public"."LiteLLM_MCPServerTable"."allow_all_keys", "public"."LiteLLM_MCPServerTable"."available_on_public_internet", "public"."LiteLLM_MCPServerTable"."delegate_auth_to_upstream", "public"."LiteLLM_MCPServerTable"."oauth_passthrough", "public"."LiteLLM_MCPServerTable"."dcr_bridge", "public"."LiteLLM_MCPServerTable"."is_byok", "public"."LiteLLM_MCPServerTable"."byok_description", "public"."LiteLLM_MCPServerTable"."byok_api_key_help_url", "public"."LiteLLM_MCPServerTable"."source_url", "public"."LiteLLM_MCPServerTable"."timeout", "public"."LiteLLM_MCPServerTable"."max_concurrent_requests", "public"."LiteLLM_MCPServerTable"."approval_status", "public"."LiteLLM_MCPServerTable"."submitted_by", "public"."LiteLLM_MCPServerTable"."submitted_at", "public"."LiteLLM_MCPServerTable"."reviewed_at", "public"."LiteLLM_MCPServerTable"."review_notes" FROM "public"."LiteLLM_MCPServerTable" WHERE ("public"."LiteLLM_MCPServerTable"."approval_status" IS NULL OR "public"."LiteLLM_MCPServerTable"."approval_status" IN ($1,$2)) OFFSET $3 /* traceparent=00-00000000000000000000000000000000-0000000000000000-01 */
+2026-08-13 19:59:34.928 GMT [200] ERROR:  relation "public.LiteLLM_MCPServerTable" does not exist at character 2702
+2026-08-13 19:59:34.928 GMT [200] STATEMENT:  SELECT "public"."LiteLLM_MCPServerTable"."server_id", "public"."LiteLLM_MCPServerTable"."server_name", "public"."LiteLLM_MCPServerTable"."alias", "public"."LiteLLM_MCPServerTable"."description", "public"."LiteLLM_MCPServerTable"."instructions", "public"."LiteLLM_MCPServerTable"."url", "public"."LiteLLM_MCPServerTable"."spec_path", "public"."LiteLLM_MCPServerTable"."transport", "public"."LiteLLM_MCPServerTable"."auth_type", "public"."LiteLLM_MCPServerTable"."credentials", "public"."LiteLLM_MCPServerTable"."created_at", "public"."LiteLLM_MCPServerTable"."created_by", "public"."LiteLLM_MCPServerTable"."updated_at", "public"."LiteLLM_MCPServerTable"."updated_by", "public"."LiteLLM_MCPServerTable"."mcp_info", "public"."LiteLLM_MCPServerTable"."mcp_access_groups", "public"."LiteLLM_MCPServerTable"."allowed_tools", "public"."LiteLLM_MCPServerTable"."tool_name_to_display_name", "public"."LiteLLM_MCPServerTable"."tool_name_to_description", "public"."LiteLLM_MCPServerTable"."extra_headers", "public"."LiteLLM_MCPServerTable"."static_headers", "public"."LiteLLM_MCPServerTable"."env_vars", "public"."LiteLLM_MCPServerTable"."status", "public"."LiteLLM_MCPServerTable"."last_health_check", "public"."LiteLLM_MCPServerTable"."health_check_error", "public"."LiteLLM_MCPServerTable"."command", "public"."LiteLLM_MCPServerTable"."args", "public"."LiteLLM_MCPServerTable"."env", "public"."LiteLLM_MCPServerTable"."issuer", "public"."LiteLLM_MCPServerTable"."authorization_url", "public"."LiteLLM_MCPServerTable"."token_url", "public"."LiteLLM_MCPServerTable"."registration_url", "public"."LiteLLM_MCPServerTable"."oauth2_flow", "public"."LiteLLM_MCPServerTable"."token_exchange_endpoint", "public"."LiteLLM_MCPServerTable"."audience", "public"."LiteLLM_MCPServerTable"."subject_token_type", "public"."LiteLLM_MCPServerTable"."token_exchange_profile", "public"."LiteLLM_MCPServerTable"."allow_all_keys", "public"."LiteLLM_MCPServerTable"."available_on_public_internet", "public"."LiteLLM_MCPServerTable"."delegate_auth_to_upstream", "public"."LiteLLM_MCPServerTable"."oauth_passthrough", "public"."LiteLLM_MCPServerTable"."dcr_bridge", "public"."LiteLLM_MCPServerTable"."is_byok", "public"."LiteLLM_MCPServerTable"."byok_description", "public"."LiteLLM_MCPServerTable"."byok_api_key_help_url", "public"."LiteLLM_MCPServerTable"."source_url", "public"."LiteLLM_MCPServerTable"."timeout", "public"."LiteLLM_MCPServerTable"."max_concurrent_requests", "public"."LiteLLM_MCPServerTable"."approval_status", "public"."LiteLLM_MCPServerTable"."submitted_by", "public"."LiteLLM_MCPServerTable"."submitted_at", "public"."LiteLLM_MCPServerTable"."reviewed_at", "public"."LiteLLM_MCPServerTable"."review_notes" FROM "public"."LiteLLM_MCPServerTable" WHERE ("public"."LiteLLM_MCPServerTable"."approval_status" IS NULL OR "public"."LiteLLM_MCPServerTable"."approval_status" IN ($1,$2)) OFFSET $3 /* traceparent=00-00000000000000000000000000000000-0000000000000000-01 */
+2026-08-13 19:59:50.222 GMT [155] LOG:  checkpoint starting: time
+2026-08-13 19:59:54.458 GMT [155] LOG:  checkpoint complete: wrote 45 buffers (0.3%); 0 WAL file(s) added, 0 removed, 0 recycled; write=4.226 s, sync=0.005 s, total=4.236 s; sync files=12, longest=0.003 s, average=0.001 s; distance=261 kB, estimate=261 kB; lsn=0/1954E38, redo lsn=0/1954E00
+2026-08-13 20:00:04.932 GMT [200] ERROR:  relation "public.LiteLLM_MCPServerTable" does not exist at character 2702
+2026-08-13 20:00:04.932 GMT [200] STATEMENT:  SELECT "public"."LiteLLM_MCPServerTable"."server_id", "public"."LiteLLM_MCPServerTable"."server_name", "public"."LiteLLM_MCPServerTable"."alias", "public"."LiteLLM_MCPServerTable"."description", "public"."LiteLLM_MCPServerTable"."instructions", "public"."LiteLLM_MCPServerTable"."url", "public"."LiteLLM_MCPServerTable"."spec_path", "public"."LiteLLM_MCPServerTable"."transport", "public"."LiteLLM_MCPServerTable"."auth_type", "public"."LiteLLM_MCPServerTable"."credentials", "public"."LiteLLM_MCPServerTable"."created_at", "public"."LiteLLM_MCPServerTable"."created_by", "public"."LiteLLM_MCPServerTable"."updated_at", "public"."LiteLLM_MCPServerTable"."updated_by", "public"."LiteLLM_MCPServerTable"."mcp_info", "public"."LiteLLM_MCPServerTable"."mcp_access_groups", "public"."LiteLLM_MCPServerTable"."allowed_tools", "public"."LiteLLM_MCPServerTable"."tool_name_to_display_name", "public"."LiteLLM_MCPServerTable"."tool_name_to_description", "public"."LiteLLM_MCPServerTable"."extra_headers", "public"."LiteLLM_MCPServerTable"."static_headers", "public"."LiteLLM_MCPServerTable"."env_vars", "public"."LiteLLM_MCPServerTable"."status", "public"."LiteLLM_MCPServerTable"."last_health_check", "public"."LiteLLM_MCPServerTable"."health_check_error", "public"."LiteLLM_MCPServerTable"."command", "public"."LiteLLM_MCPServerTable"."args", "public"."LiteLLM_MCPServerTable"."env", "public"."LiteLLM_MCPServerTable"."issuer", "public"."LiteLLM_MCPServerTable"."authorization_url", "public"."LiteLLM_MCPServerTable"."token_url", "public"."LiteLLM_MCPServerTable"."registration_url", "public"."LiteLLM_MCPServerTable"."oauth2_flow", "public"."LiteLLM_MCPServerTable"."token_exchange_endpoint", "public"."LiteLLM_MCPServerTable"."audience", "public"."LiteLLM_MCPServerTable"."subject_token_type", "public"."LiteLLM_MCPServerTable"."token_exchange_profile", "public"."LiteLLM_MCPServerTable"."allow_all_keys", "public"."LiteLLM_MCPServerTable"."available_on_public_internet", "public"."LiteLLM_MCPServerTable"."delegate_auth_to_upstream", "public"."LiteLLM_MCPServerTable"."oauth_passthrough", "public"."LiteLLM_MCPServerTable"."dcr_bridge", "public"."LiteLLM_MCPServerTable"."is_byok", "public"."LiteLLM_MCPServerTable"."byok_description", "public"."LiteLLM_MCPServerTable"."byok_api_key_help_url", "public"."LiteLLM_MCPServerTable"."source_url", "public"."LiteLLM_MCPServerTable"."timeout", "public"."LiteLLM_MCPServerTable"."max_concurrent_requests", "public"."LiteLLM_MCPServerTable"."approval_status", "public"."LiteLLM_MCPServerTable"."submitted_by", "public"."LiteLLM_MCPServerTable"."submitted_at", "public"."LiteLLM_MCPServerTable"."reviewed_at", "public"."LiteLLM_MCPServerTable"."review_notes" FROM "public"."LiteLLM_MCPServerTable" WHERE ("public"."LiteLLM_MCPServerTable"."approval_status" IS NULL OR "public"."LiteLLM_MCPServerTable"."approval_status" IN ($1,$2)) OFFSET $3 /* traceparent=00-00000000000000000000000000000000-0000000000000000-01 */
+
+$ bash -c kubectl --context kind-llm-lab -n llm-gateway logs deploy/litellm --tail=60 2>&1
+  File "/app/.venv/lib/python3.13/site-packages/prisma/client.py", line 684, in _execute
+    return await self._engine.query(builder.build(), tx_id=self._tx_id)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/.venv/lib/python3.13/site-packages/litellm/proxy/db/prisma_client.py", line 113, in query
+    return await self._engine.query(content, tx_id=tx_id)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/.venv/lib/python3.13/site-packages/prisma/engine/query.py", line 244, in query
+    return await self.request(
+           ^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+    )
+    ^
+  File "/app/.venv/lib/python3.13/site-packages/prisma/engine/http.py", line 141, in request
+    return utils.handle_response_errors(resp, errors_data)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "/app/.venv/lib/python3.13/site-packages/prisma/engine/utils.py", line 192, in handle_response_errors
+    raise exc(error)
+prisma.errors.TableNotFoundError: The table `public.LiteLLM_MCPServerTable` does not exist in the current database.
+INFO:     10.244.0.1:44582 - "GET /health/readiness HTTP/1.1" 200 OK
+INFO:     10.244.0.1:44586 - "GET /health/liveliness HTTP/1.1" 200 OK
+INFO:     10.244.0.1:58492 - "GET /health/readiness HTTP/1.1" 200 OK
+INFO:     10.244.0.1:46410 - "GET /health/liveliness HTTP/1.1" 200 OK
+INFO:     10.244.0.1:46422 - "GET /health/readiness HTTP/1.1" 200 OK
+[92m20:00:04 - LiteLLM Proxy:ERROR[0m: proxy_server.py:6840 - litellm.proxy.proxy_server.py::ProxyConfig:reload_mcp_servers_from_db - The table `public.LiteLLM_MCPServerTable` does not exist in the current database.
+Traceback (most recent call last):
+  File "/app/.venv/lib/python3.13/site-packages/litellm/proxy/proxy_server.py", line 6838, in reload_mcp_servers_from_db
+    await global_mcp_server_manager.reload_servers_from_database()
+  File "/app/.venv/lib/python3.13/site-packages/litellm/proxy/_experimental/mcp_server/mcp_server_manager.py", line 5443, in reload_servers_from_database
+    raw_rows: Sequence[BaseModel] = await MCPServerRepository(prisma_client).table.find_many(
+                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<6 lines>...
+    )
+    ^
+  File "/app/.venv/lib/python3.13/site-packages/prisma/actions.py", line 11777, in find_many
+    resp = await self._client._execute(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<11 lines>...
+    )
+    ^
+  File "/app/.venv/lib/python3.13/site-packages/prisma/client.py", line 684, in _execute
+    return await self._engine.query(builder.build(), tx_id=self._tx_id)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/.venv/lib/python3.13/site-packages/litellm/proxy/db/prisma_client.py", line 113, in query
+    return await self._engine.query(content, tx_id=tx_id)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/.venv/lib/python3.13/site-packages/prisma/engine/query.py", line 244, in query
+    return await self.request(
+           ^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+    )
+    ^
+  File "/app/.venv/lib/python3.13/site-packages/prisma/engine/http.py", line 141, in request
+    return utils.handle_response_errors(resp, errors_data)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "/app/.venv/lib/python3.13/site-packages/prisma/engine/utils.py", line 192, in handle_response_errors
+    raise exc(error)
+prisma.errors.TableNotFoundError: The table `public.LiteLLM_MCPServerTable` does not exist in the current database.
+INFO:     10.244.0.1:42038 - "GET /health/readiness HTTP/1.1" 200 OK
+INFO:     10.244.0.1:42044 - "GET /health/liveliness HTTP/1.1" 200 OK
+INFO:     10.244.0.1:46776 - "GET /health/readiness HTTP/1.1" 200 OK
+
+===== litellm env wiring (passwords redacted) =====
+
+$ bash -c kubectl --context kind-llm-lab -n llm-gateway get deploy litellm   -o jsonpath='{range .spec.template.spec.containers[0].env[*]}{.name}={.value}{"\n"}{end}' 2>/dev/null   | grep -Ei 'DATABASE|SCHEMA|MASTER' | sed -E 's#://[^@]*@#://REDACTED@#'
+DATABASE_USERNAME=
+DATABASE_PASSWORD=
+DATABASE_HOST=litellm-postgresql
+DATABASE_NAME=litellm
+PROXY_MASTER_KEY=
+DISABLE_SCHEMA_UPDATE=true
 
 ===== helm releases =====
 
 $ helm list -A --kube-context kind-llm-lab
 NAME    	NAMESPACE              	REVISION	UPDATED                             	STATUS  	CHART                      	APP VERSION
-aieg    	envoy-ai-gateway-system	1       	2026-08-13 10:04:57.570324 -0700 PDT	deployed	ai-gateway-helm-v1.0.0     	v1.0.0     
-aieg-crd	envoy-ai-gateway-system	1       	2026-08-13 10:04:55.227491 -0700 PDT	deployed	ai-gateway-crds-helm-v1.0.0	v1.0.0     
-eg      	envoy-gateway-system   	1       	2026-08-13 10:04:31.81333 -0700 PDT 	deployed	gateway-helm-v1.5.6        	v1.5.6     
-ngf     	nginx-gateway          	1       	2026-08-13 10:02:05.673201 -0700 PDT	deployed	nginx-gateway-fabric-2.6.7 	2.6.7      
+aieg-crd	envoy-ai-gateway-system	1       	2026-08-13 12:33:46.883018 -0700 PDT	deployed	ai-gateway-crds-helm-v1.0.0	v1.0.0     
+litellm 	llm-gateway            	1       	2026-08-13 12:54:33.261482 -0700 PDT	deployed	litellm-helm-1.1.1         	v1.85.1    
+ngf     	nginx-gateway          	1       	2026-08-13 12:31:04.82861 -0700 PDT 	deployed	nginx-gateway-fabric-2.6.7 	2.6.7      
 
 ===== helm repos configured =====
 
@@ -593,100 +604,41 @@ jetstack            	https://charts.jetstack.io
 ===== logs: vllm =====
 
 $ bash -c kubectl --context kind-llm-lab -n llm-serving logs -l app=vllm-cpu --tail=60 --all-containers 2>&1
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO 08-13 17:06:11 [loggers.py:310] Engine 000: Avg prompt throughput: 1.8 tokens/s, Avg generation throughput: 2.2 tokens/s, Running: 1 reqs, Waiting: 0 reqs, GPU KV cache usage: 0.1%, Prefix cache hit rate: 48.5%
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
-(APIServer pid=1) INFO:     10.244.0.14:37540 - "GET /metrics HTTP/1.1" 200 OK
+No resources found in llm-serving namespace.
 
 ===== logs: epp =====
 
 $ bash -c kubectl --context kind-llm-lab -n llm-serving logs -l app=primary-pool-epp --tail=30 2>&1
-{"level":"info","ts":1786640766.6695929,"caller":"scheduling/scheduler_profile.go:161","msg":"Running scorer plugin","x-request-id":"23d7461c-4c2b-4250-bdbf-6b44b63d7b13","objectiveKey":"","incomingModelName":"qwen-small","targetModelName":"qwen-small","priority":0,"plugin":"prefix-cache-scorer/prefix-cache-scorer"}
-{"level":"info","ts":1786640766.6696,"caller":"scheduling/scheduler_profile.go:171","msg":"Completed running scorer plugins successfully","x-request-id":"23d7461c-4c2b-4250-bdbf-6b44b63d7b13","objectiveKey":"","incomingModelName":"qwen-small","targetModelName":"qwen-small","priority":0}
-{"level":"info","ts":1786640766.66961,"caller":"scheduling/scheduler_profile.go:184","msg":"Running picker plugin","x-request-id":"23d7461c-4c2b-4250-bdbf-6b44b63d7b13","objectiveKey":"","incomingModelName":"qwen-small","targetModelName":"qwen-small","priority":0,"plugin":"max-score-picker/max-score-picker"}
-{"level":"info","ts":1786640766.6696231,"caller":"scheduling/scheduler.go:83","msg":"Completed running scheduler profile succuessfully","x-request-id":"23d7461c-4c2b-4250-bdbf-6b44b63d7b13","objectiveKey":"","incomingModelName":"qwen-small","targetModelName":"qwen-small","priority":0,"profile":"default"}
-{"level":"info","ts":1786640766.669666,"caller":"scheduling/scheduler.go:67","msg":"Running profile handler, Pick profiles","x-request-id":"23d7461c-4c2b-4250-bdbf-6b44b63d7b13","objectiveKey":"","incomingModelName":"qwen-small","targetModelName":"qwen-small","priority":0,"plugin":"single-profile-handler/single-profile-handler"}
-{"level":"info","ts":1786640766.6696973,"caller":"scheduling/scheduler.go:71","msg":"Completed running profile handler Pick profiles successfully","x-request-id":"23d7461c-4c2b-4250-bdbf-6b44b63d7b13","objectiveKey":"","incomingModelName":"qwen-small","targetModelName":"qwen-small","priority":0,"plugin":"single-profile-handler/single-profile-handler","result":{}}
-{"level":"info","ts":1786640766.6697028,"caller":"scheduling/scheduler.go:95","msg":"Running profile handler, ProcessResults","x-request-id":"23d7461c-4c2b-4250-bdbf-6b44b63d7b13","objectiveKey":"","incomingModelName":"qwen-small","targetModelName":"qwen-small","priority":0,"plugin":"single-profile-handler/single-profile-handler"}
-{"level":"info","ts":1786640766.6697059,"caller":"scheduling/scheduler.go:99","msg":"Completed running profile handler ProcessResults successfully","x-request-id":"23d7461c-4c2b-4250-bdbf-6b44b63d7b13","objectiveKey":"","incomingModelName":"qwen-small","targetModelName":"qwen-small","priority":0,"plugin":"single-profile-handler/single-profile-handler"}
-{"level":"info","ts":1786640766.6697204,"caller":"requestcontrol/director.go:332","msg":"Request handled","x-request-id":"23d7461c-4c2b-4250-bdbf-6b44b63d7b13","objectiveKey":"","incomingModelName":"qwen-small","targetModelName":"qwen-small","priority":0,"objectiveKey":"","incomingModelName":"qwen-small","targetModel":"qwen-small","endpoint":"10.244.0.13:8000"}
-{"level":"info","ts":1786640766.6698577,"caller":"handlers/server.go:391","msg":"EPP sent request body response(s) to proxy","x-request-id":"23d7461c-4c2b-4250-bdbf-6b44b63d7b13","modelName":"qwen-small","targetModelName":"qwen-small"}
-{"level":"info","ts":1786640767.2685986,"caller":"handlers/server.go:419","msg":"EPP sent response body back to proxy","x-request-id":"23d7461c-4c2b-4250-bdbf-6b44b63d7b13"}
-{"level":"info","ts":1786640767.2996032,"caller":"handlers/server.go:223","msg":"EPP received request","x-request-id":"2325b774-2498-4e79-a05c-d9246b8b194e"}
-{"level":"info","ts":1786640767.299677,"caller":"requestcontrol/director.go:117","msg":"No associated InferenceObjective found, using default","x-request-id":"2325b774-2498-4e79-a05c-d9246b8b194e","objectiveKey":""}
-{"level":"info","ts":1786640767.2998326,"caller":"scheduling/scheduler.go:67","msg":"Running profile handler, Pick profiles","x-request-id":"2325b774-2498-4e79-a05c-d9246b8b194e","objectiveKey":"","incomingModelName":"qwen-small","targetModelName":"qwen-small","priority":0,"plugin":"single-profile-handler/single-profile-handler"}
-{"level":"info","ts":1786640767.2998521,"caller":"scheduling/scheduler.go:71","msg":"Completed running profile handler Pick profiles successfully","x-request-id":"2325b774-2498-4e79-a05c-d9246b8b194e","objectiveKey":"","incomingModelName":"qwen-small","targetModelName":"qwen-small","priority":0,"plugin":"single-profile-handler/single-profile-handler","result":{"default":{}}}
-{"level":"info","ts":1786640767.2998607,"caller":"scheduling/scheduler.go:77","msg":"Running scheduler profile","x-request-id":"2325b774-2498-4e79-a05c-d9246b8b194e","objectiveKey":"","incomingModelName":"qwen-small","targetModelName":"qwen-small","priority":0,"profile":"default"}
-{"level":"info","ts":1786640767.299864,"caller":"scheduling/scheduler_profile.go:146","msg":"Completed running filter plugins","x-request-id":"2325b774-2498-4e79-a05c-d9246b8b194e","objectiveKey":"","incomingModelName":"qwen-small","targetModelName":"qwen-small","priority":0,"remainingEndpoints":1}
-{"level":"info","ts":1786640767.2998686,"caller":"scheduling/scheduler_profile.go:161","msg":"Running scorer plugin","x-request-id":"2325b774-2498-4e79-a05c-d9246b8b194e","objectiveKey":"","incomingModelName":"qwen-small","targetModelName":"qwen-small","priority":0,"plugin":"queue-scorer/queue-scorer"}
-{"level":"info","ts":1786640767.2998729,"caller":"scheduling/scheduler_profile.go:161","msg":"Running scorer plugin","x-request-id":"2325b774-2498-4e79-a05c-d9246b8b194e","objectiveKey":"","incomingModelName":"qwen-small","targetModelName":"qwen-small","priority":0,"plugin":"kv-cache-utilization-scorer/kv-cache-utilization-scorer"}
-{"level":"info","ts":1786640767.2998765,"caller":"scheduling/scheduler_profile.go:161","msg":"Running scorer plugin","x-request-id":"2325b774-2498-4e79-a05c-d9246b8b194e","objectiveKey":"","incomingModelName":"qwen-small","targetModelName":"qwen-small","priority":0,"plugin":"prefix-cache-scorer/prefix-cache-scorer"}
-{"level":"info","ts":1786640767.2998817,"caller":"scheduling/scheduler_profile.go:171","msg":"Completed running scorer plugins successfully","x-request-id":"2325b774-2498-4e79-a05c-d9246b8b194e","objectiveKey":"","incomingModelName":"qwen-small","targetModelName":"qwen-small","priority":0}
-{"level":"info","ts":1786640767.2998843,"caller":"scheduling/scheduler_profile.go:184","msg":"Running picker plugin","x-request-id":"2325b774-2498-4e79-a05c-d9246b8b194e","objectiveKey":"","incomingModelName":"qwen-small","targetModelName":"qwen-small","priority":0,"plugin":"max-score-picker/max-score-picker"}
-{"level":"info","ts":1786640767.2998884,"caller":"scheduling/scheduler.go:83","msg":"Completed running scheduler profile succuessfully","x-request-id":"2325b774-2498-4e79-a05c-d9246b8b194e","objectiveKey":"","incomingModelName":"qwen-small","targetModelName":"qwen-small","priority":0,"profile":"default"}
-{"level":"info","ts":1786640767.2998908,"caller":"scheduling/scheduler.go:67","msg":"Running profile handler, Pick profiles","x-request-id":"2325b774-2498-4e79-a05c-d9246b8b194e","objectiveKey":"","incomingModelName":"qwen-small","targetModelName":"qwen-small","priority":0,"plugin":"single-profile-handler/single-profile-handler"}
-{"level":"info","ts":1786640767.299893,"caller":"scheduling/scheduler.go:71","msg":"Completed running profile handler Pick profiles successfully","x-request-id":"2325b774-2498-4e79-a05c-d9246b8b194e","objectiveKey":"","incomingModelName":"qwen-small","targetModelName":"qwen-small","priority":0,"plugin":"single-profile-handler/single-profile-handler","result":{}}
-{"level":"info","ts":1786640767.2998953,"caller":"scheduling/scheduler.go:95","msg":"Running profile handler, ProcessResults","x-request-id":"2325b774-2498-4e79-a05c-d9246b8b194e","objectiveKey":"","incomingModelName":"qwen-small","targetModelName":"qwen-small","priority":0,"plugin":"single-profile-handler/single-profile-handler"}
-{"level":"info","ts":1786640767.2999005,"caller":"scheduling/scheduler.go:99","msg":"Completed running profile handler ProcessResults successfully","x-request-id":"2325b774-2498-4e79-a05c-d9246b8b194e","objectiveKey":"","incomingModelName":"qwen-small","targetModelName":"qwen-small","priority":0,"plugin":"single-profile-handler/single-profile-handler"}
-{"level":"info","ts":1786640767.299925,"caller":"requestcontrol/director.go:332","msg":"Request handled","x-request-id":"2325b774-2498-4e79-a05c-d9246b8b194e","objectiveKey":"","incomingModelName":"qwen-small","targetModelName":"qwen-small","priority":0,"objectiveKey":"","incomingModelName":"qwen-small","targetModel":"qwen-small","endpoint":"10.244.0.13:8000"}
-{"level":"info","ts":1786640767.3000119,"caller":"handlers/server.go:391","msg":"EPP sent request body response(s) to proxy","x-request-id":"2325b774-2498-4e79-a05c-d9246b8b194e","modelName":"qwen-small","targetModelName":"qwen-small"}
-{"level":"info","ts":1786640771.7077155,"caller":"handlers/server.go:419","msg":"EPP sent response body back to proxy","x-request-id":"2325b774-2498-4e79-a05c-d9246b8b194e"}
+{"level":"info","ts":1786649652.5424008,"caller":"handlers/server.go:419","msg":"EPP sent response body back to proxy","x-request-id":"0da01b71-0f2e-4062-9b97-d16f4b1c6d9d"}
+{"level":"info","ts":1786649652.5809,"caller":"handlers/server.go:223","msg":"EPP received request","x-request-id":"f2b6de2b-e37d-4e67-b984-e7f2c34b0b4c"}
+{"level":"info","ts":1786649652.5810218,"caller":"requestcontrol/director.go:117","msg":"No associated InferenceObjective found, using default","x-request-id":"f2b6de2b-e37d-4e67-b984-e7f2c34b0b4c","objectiveKey":""}
+{"level":"info","ts":1786649652.581111,"caller":"scheduling/scheduler.go:67","msg":"Running profile handler, Pick profiles","x-request-id":"f2b6de2b-e37d-4e67-b984-e7f2c34b0b4c","objectiveKey":"","incomingModelName":"qwen-small","targetModelName":"qwen-small","priority":0,"plugin":"single-profile-handler/single-profile-handler"}
+{"level":"info","ts":1786649652.5811322,"caller":"scheduling/scheduler.go:71","msg":"Completed running profile handler Pick profiles successfully","x-request-id":"f2b6de2b-e37d-4e67-b984-e7f2c34b0b4c","objectiveKey":"","incomingModelName":"qwen-small","targetModelName":"qwen-small","priority":0,"plugin":"single-profile-handler/single-profile-handler","result":{"default":{}}}
+{"level":"info","ts":1786649652.581142,"caller":"scheduling/scheduler.go:77","msg":"Running scheduler profile","x-request-id":"f2b6de2b-e37d-4e67-b984-e7f2c34b0b4c","objectiveKey":"","incomingModelName":"qwen-small","targetModelName":"qwen-small","priority":0,"profile":"default"}
+{"level":"info","ts":1786649652.5811448,"caller":"scheduling/scheduler_profile.go:146","msg":"Completed running filter plugins","x-request-id":"f2b6de2b-e37d-4e67-b984-e7f2c34b0b4c","objectiveKey":"","incomingModelName":"qwen-small","targetModelName":"qwen-small","priority":0,"remainingEndpoints":1}
+{"level":"info","ts":1786649652.5811489,"caller":"scheduling/scheduler_profile.go:161","msg":"Running scorer plugin","x-request-id":"f2b6de2b-e37d-4e67-b984-e7f2c34b0b4c","objectiveKey":"","incomingModelName":"qwen-small","targetModelName":"qwen-small","priority":0,"plugin":"queue-scorer/queue-scorer"}
+{"level":"info","ts":1786649652.5811534,"caller":"scheduling/scheduler_profile.go:161","msg":"Running scorer plugin","x-request-id":"f2b6de2b-e37d-4e67-b984-e7f2c34b0b4c","objectiveKey":"","incomingModelName":"qwen-small","targetModelName":"qwen-small","priority":0,"plugin":"kv-cache-utilization-scorer/kv-cache-utilization-scorer"}
+{"level":"info","ts":1786649652.5811563,"caller":"scheduling/scheduler_profile.go:161","msg":"Running scorer plugin","x-request-id":"f2b6de2b-e37d-4e67-b984-e7f2c34b0b4c","objectiveKey":"","incomingModelName":"qwen-small","targetModelName":"qwen-small","priority":0,"plugin":"prefix-cache-scorer/prefix-cache-scorer"}
+{"level":"info","ts":1786649652.5811608,"caller":"scheduling/scheduler_profile.go:171","msg":"Completed running scorer plugins successfully","x-request-id":"f2b6de2b-e37d-4e67-b984-e7f2c34b0b4c","objectiveKey":"","incomingModelName":"qwen-small","targetModelName":"qwen-small","priority":0}
+{"level":"info","ts":1786649652.5811665,"caller":"scheduling/scheduler_profile.go:184","msg":"Running picker plugin","x-request-id":"f2b6de2b-e37d-4e67-b984-e7f2c34b0b4c","objectiveKey":"","incomingModelName":"qwen-small","targetModelName":"qwen-small","priority":0,"plugin":"max-score-picker/max-score-picker"}
+{"level":"info","ts":1786649652.5811753,"caller":"scheduling/scheduler.go:83","msg":"Completed running scheduler profile succuessfully","x-request-id":"f2b6de2b-e37d-4e67-b984-e7f2c34b0b4c","objectiveKey":"","incomingModelName":"qwen-small","targetModelName":"qwen-small","priority":0,"profile":"default"}
+{"level":"info","ts":1786649652.5811784,"caller":"scheduling/scheduler.go:67","msg":"Running profile handler, Pick profiles","x-request-id":"f2b6de2b-e37d-4e67-b984-e7f2c34b0b4c","objectiveKey":"","incomingModelName":"qwen-small","targetModelName":"qwen-small","priority":0,"plugin":"single-profile-handler/single-profile-handler"}
+{"level":"info","ts":1786649652.5811808,"caller":"scheduling/scheduler.go:71","msg":"Completed running profile handler Pick profiles successfully","x-request-id":"f2b6de2b-e37d-4e67-b984-e7f2c34b0b4c","objectiveKey":"","incomingModelName":"qwen-small","targetModelName":"qwen-small","priority":0,"plugin":"single-profile-handler/single-profile-handler","result":{}}
+{"level":"info","ts":1786649652.5811837,"caller":"scheduling/scheduler.go:95","msg":"Running profile handler, ProcessResults","x-request-id":"f2b6de2b-e37d-4e67-b984-e7f2c34b0b4c","objectiveKey":"","incomingModelName":"qwen-small","targetModelName":"qwen-small","priority":0,"plugin":"single-profile-handler/single-profile-handler"}
+{"level":"info","ts":1786649652.5811882,"caller":"scheduling/scheduler.go:99","msg":"Completed running profile handler ProcessResults successfully","x-request-id":"f2b6de2b-e37d-4e67-b984-e7f2c34b0b4c","objectiveKey":"","incomingModelName":"qwen-small","targetModelName":"qwen-small","priority":0,"plugin":"single-profile-handler/single-profile-handler"}
+{"level":"info","ts":1786649652.5811944,"caller":"requestcontrol/director.go:332","msg":"Request handled","x-request-id":"f2b6de2b-e37d-4e67-b984-e7f2c34b0b4c","objectiveKey":"","incomingModelName":"qwen-small","targetModelName":"qwen-small","priority":0,"objectiveKey":"","incomingModelName":"qwen-small","targetModel":"qwen-small","endpoint":"10.244.0.13:8000"}
+{"level":"info","ts":1786649652.5812423,"caller":"handlers/server.go:391","msg":"EPP sent request body response(s) to proxy","x-request-id":"f2b6de2b-e37d-4e67-b984-e7f2c34b0b4c","modelName":"qwen-small","targetModelName":"qwen-small"}
+{"level":"info","ts":1786649657.2012916,"caller":"handlers/server.go:419","msg":"EPP sent response body back to proxy","x-request-id":"f2b6de2b-e37d-4e67-b984-e7f2c34b0b4c"}
+{"level":"info","ts":1786649742.679329,"caller":"controller/inferencepool_reconciler.go:46","msg":"Reconciling InferencePool","controller":"inferencepool","controllerGroup":"inference.networking.k8s.io","controllerKind":"InferencePool","InferencePool":{"name":"primary-pool","namespace":"llm-serving"},"namespace":"llm-serving","name":"primary-pool","reconcileID":"bee0bd8e-0b86-47ce-98df-986491928794"}
+{"level":"info","ts":1786649742.7012663,"caller":"controller/inferencepool_reconciler.go:46","msg":"Reconciling InferencePool","controller":"inferencepool","controllerGroup":"inference.networking.k8s.io","controllerKind":"InferencePool","InferencePool":{"name":"primary-pool","namespace":"llm-serving"},"namespace":"llm-serving","name":"primary-pool","reconcileID":"2d0aa495-9c44-4780-86fd-d56e5f5753bb"}
+{"level":"info","ts":1786650836.5734677,"caller":"controller/pod_reconciler.go:49","msg":"Pod being reconciled","controller":"pod","controllerGroup":"","controllerKind":"Pod","Pod":{"name":"vllm-cpu-65786c8f7d-zkwbl","namespace":"llm-serving"},"namespace":"llm-serving","name":"vllm-cpu-65786c8f7d-zkwbl","reconcileID":"511a3cb6-c357-47c1-bd97-bb16b24e4082"}
+{"level":"error","ts":1786650836.5756657,"caller":"datalayer/collector.go:211","msg":"poll failed","endpoint":"10.244.0.13","source":"metrics-data-source/metrics-data-source","error":"failed to fetch data from llm-serving/vllm-cpu-65786c8f7d-zkwbl-rank-0: Get \"http://10.244.0.13:8000/metrics\": context canceled","stacktrace":"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer.logErrorTransition\n\t/go/pkg/mod/sigs.k8s.io/gateway-api-inference-extension@v1.5.0/pkg/epp/datalayer/collector.go:211\nsigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer.(*Collector).startCollection.func1.1\n\t/go/pkg/mod/sigs.k8s.io/gateway-api-inference-extension@v1.5.0/pkg/epp/datalayer/collector.go:148"}
+{"level":"info","ts":1786650836.5758715,"caller":"datalayer/collector.go:128","msg":"terminating collection","endpoint":"10.244.0.13"}
+{"level":"info","ts":1786650836.5878944,"caller":"controller/pod_reconciler.go:49","msg":"Pod being reconciled","controller":"pod","controllerGroup":"","controllerKind":"Pod","Pod":{"name":"vllm-cpu-65786c8f7d-zkwbl","namespace":"llm-serving"},"namespace":"llm-serving","name":"vllm-cpu-65786c8f7d-zkwbl","reconcileID":"c90eb202-c22e-423a-9b99-f371aad6c461"}
+{"level":"info","ts":1786650837.992864,"caller":"controller/pod_reconciler.go:49","msg":"Pod being reconciled","controller":"pod","controllerGroup":"","controllerKind":"Pod","Pod":{"name":"vllm-cpu-65786c8f7d-zkwbl","namespace":"llm-serving"},"namespace":"llm-serving","name":"vllm-cpu-65786c8f7d-zkwbl","reconcileID":"ed629067-574b-4ce2-8bfb-5e172c503f51"}
+{"level":"info","ts":1786650838.1154988,"caller":"controller/pod_reconciler.go:49","msg":"Pod being reconciled","controller":"pod","controllerGroup":"","controllerKind":"Pod","Pod":{"name":"vllm-cpu-65786c8f7d-zkwbl","namespace":"llm-serving"},"namespace":"llm-serving","name":"vllm-cpu-65786c8f7d-zkwbl","reconcileID":"d2db997c-d55c-4188-932e-0b6fa893ad07"}
+{"level":"info","ts":1786650838.1171587,"caller":"controller/pod_reconciler.go:49","msg":"Pod being reconciled","controller":"pod","controllerGroup":"","controllerKind":"Pod","Pod":{"name":"vllm-cpu-65786c8f7d-zkwbl","namespace":"llm-serving"},"namespace":"llm-serving","name":"vllm-cpu-65786c8f7d-zkwbl","reconcileID":"3c364444-3834-4fb9-ac3f-ff3492371c15"}
+{"level":"info","ts":1786650908.566165,"caller":"approximateprefix/plugin.go:122","msg":"Removed pod not in active set","pod":"llm-serving/vllm-cpu-65786c8f7d-zkwbl-rank-0"}
 
 ===== node capacity =====
 
@@ -704,22 +656,22 @@ Labels:             beta.kubernetes.io/arch=arm64
                     node-role.kubernetes.io/control-plane=
 Annotations:        node.alpha.kubernetes.io/ttl: 0
                     volumes.kubernetes.io/controller-managed-attach-detach: true
-CreationTimestamp:  Thu, 13 Aug 2026 10:01:36 -0700
+CreationTimestamp:  Thu, 13 Aug 2026 12:30:33 -0700
 Taints:             <none>
 Unschedulable:      false
 Lease:
   HolderIdentity:  llm-lab-control-plane
   AcquireTime:     <unset>
-  RenewTime:       Thu, 13 Aug 2026 10:06:03 -0700
+  RenewTime:       Thu, 13 Aug 2026 13:00:23 -0700
 Conditions:
   Type             Status  LastHeartbeatTime                 LastTransitionTime                Reason                       Message
   ----             ------  -----------------                 ------------------                ------                       -------
-  MemoryPressure   False   Thu, 13 Aug 2026 10:05:43 -0700   Thu, 13 Aug 2026 10:01:34 -0700   KubeletHasSufficientMemory   kubelet has sufficient memory available
-  DiskPressure     False   Thu, 13 Aug 2026 10:05:43 -0700   Thu, 13 Aug 2026 10:01:34 -0700   KubeletHasNoDiskPressure     kubelet has no disk pressure
-  PIDPressure      False   Thu, 13 Aug 2026 10:05:43 -0700   Thu, 13 Aug 2026 10:01:34 -0700   KubeletHasSufficientPID      kubelet has sufficient PID available
-  Ready            True    Thu, 13 Aug 2026 10:05:43 -0700   Thu, 13 Aug 2026 10:01:55 -0700   KubeletReady                 kubelet is posting ready status
+  MemoryPressure   False   Thu, 13 Aug 2026 13:00:19 -0700   Thu, 13 Aug 2026 12:30:31 -0700   KubeletHasSufficientMemory   kubelet has sufficient memory available
+  DiskPressure     False   Thu, 13 Aug 2026 13:00:19 -0700   Thu, 13 Aug 2026 12:30:31 -0700   KubeletHasNoDiskPressure     kubelet has no disk pressure
+  PIDPressure      False   Thu, 13 Aug 2026 13:00:19 -0700   Thu, 13 Aug 2026 12:30:31 -0700   KubeletHasSufficientPID      kubelet has sufficient PID available
+  Ready            True    Thu, 13 Aug 2026 13:00:19 -0700   Thu, 13 Aug 2026 12:30:53 -0700   KubeletReady                 kubelet is posting ready status
 Addresses:
-  InternalIP:  10.89.0.5
+  InternalIP:  10.89.0.8
   Hostname:    llm-lab-control-plane
 Capacity:
   cpu:                6
@@ -740,8 +692,8 @@ Allocatable:
   memory:             9911400Ki
   pods:               110
 System Info:
-  Machine ID:                 9e336724e04648aead0c35ac50c0e32a
-  System UUID:                9e336724e04648aead0c35ac50c0e32a
+  Machine ID:                 3fe505afe2d34182b476ab6971b17b6b
+  System UUID:                3fe505afe2d34182b476ab6971b17b6b
   Boot ID:                    cc163034-7b47-47a3-89e7-aa253b743934
   Kernel Version:             7.1.3-200.fc44.aarch64
   OS Image:                   Debian GNU/Linux 12 (bookworm)
@@ -752,47 +704,56 @@ System Info:
 PodCIDR:                      10.244.0.0/24
 PodCIDRs:                     10.244.0.0/24
 ProviderID:                   kind://podman/llm-lab/llm-lab-control-plane
-Non-terminated Pods:          (19 in total)
-  Namespace                   Name                                                            CPU Requests  CPU Limits  Memory Requests  Memory Limits  Age
-  ---------                   ----                                                            ------------  ----------  ---------------  -------------  ---
-  envoy-ai-gateway-system     ai-gateway-controller-6cfbbf48bc-t58zm                          0 (0%)        0 (0%)      0 (0%)           0 (0%)         75s
-  envoy-gateway-system        envoy-gateway-7c999dc6f9-w9dc9                                  50m (0%)      0 (0%)      96Mi (0%)        384Mi (3%)     90s
-  envoy-gateway-system        envoy-llm-gateway-envoy-ai-gateway-3a17de18-7cf5785799-dllzz    60m (1%)      0 (0%)      128Mi (1%)       384Mi (3%)     65s
-  kube-system                 coredns-66bc5c9577-6bpkj                                        100m (1%)     0 (0%)      70Mi (0%)        170Mi (1%)     4m28s
-  kube-system                 coredns-66bc5c9577-c7qlm                                        100m (1%)     0 (0%)      70Mi (0%)        170Mi (1%)     4m28s
-  kube-system                 etcd-llm-lab-control-plane                                      100m (1%)     0 (0%)      100Mi (1%)       0 (0%)         4m34s
-  kube-system                 kindnet-vdff5                                                   100m (1%)     100m (1%)   50Mi (0%)        50Mi (0%)      4m28s
-  kube-system                 kube-apiserver-llm-lab-control-plane                            250m (4%)     0 (0%)      0 (0%)           0 (0%)         4m34s
-  kube-system                 kube-controller-manager-llm-lab-control-plane                   200m (3%)     0 (0%)      0 (0%)           0 (0%)         4m34s
-  kube-system                 kube-proxy-4792w                                                0 (0%)        0 (0%)      0 (0%)           0 (0%)         4m28s
-  kube-system                 kube-scheduler-llm-lab-control-plane                            100m (1%)     0 (0%)      0 (0%)           0 (0%)         4m34s
-  llm-gateway                 llm-ingress-nginx-84bd78f64-2khg6                               0 (0%)        0 (0%)      0 (0%)           0 (0%)         3m48s
-  llm-serving                 host-bridge-7c9bfc687c-hpct8                                    25m (0%)      0 (0%)      32Mi (0%)        128Mi (1%)     3m47s
-  llm-serving                 mock-backend-79b4f6477c-c55p2                                   25m (0%)      0 (0%)      32Mi (0%)        128Mi (1%)     3m28s
-  llm-serving                 mock-backend-79b4f6477c-lvb2l                                   25m (0%)      0 (0%)      32Mi (0%)        128Mi (1%)     3m28s
-  llm-serving                 primary-pool-epp-74448d9c74-2m5x7                               50m (0%)      0 (0%)      64Mi (0%)        256Mi (2%)     119s
-  llm-serving                 vllm-cpu-f9cb85dbf-lflvh                                        2 (33%)       3 (50%)     3Gi (31%)        6Gi (63%)      3m12s
-  local-path-storage          local-path-provisioner-7b8c8ddbd6-qw5s2                         0 (0%)        0 (0%)      0 (0%)           0 (0%)         4m28s
-  nginx-gateway               ngf-nginx-gateway-fabric-56dfc4fb5-cmk7s                        50m (0%)      0 (0%)      64Mi (0%)        0 (0%)         4m
+Non-terminated Pods:          (17 in total)
+  Namespace                   Name                                             CPU Requests  CPU Limits  Memory Requests  Memory Limits  Age
+  ---------                   ----                                             ------------  ----------  ---------------  -------------  ---
+  kube-system                 coredns-66bc5c9577-hfsn2                         100m (1%)     0 (0%)      70Mi (0%)        170Mi (1%)     29m
+  kube-system                 coredns-66bc5c9577-pl2wf                         100m (1%)     0 (0%)      70Mi (0%)        170Mi (1%)     29m
+  kube-system                 etcd-llm-lab-control-plane                       100m (1%)     0 (0%)      100Mi (1%)       0 (0%)         29m
+  kube-system                 kindnet-gssds                                    100m (1%)     100m (1%)   50Mi (0%)        50Mi (0%)      29m
+  kube-system                 kube-apiserver-llm-lab-control-plane             250m (4%)     0 (0%)      0 (0%)           0 (0%)         29m
+  kube-system                 kube-controller-manager-llm-lab-control-plane    200m (3%)     0 (0%)      0 (0%)           0 (0%)         29m
+  kube-system                 kube-proxy-7pkgt                                 0 (0%)        0 (0%)      0 (0%)           0 (0%)         29m
+  kube-system                 kube-scheduler-llm-lab-control-plane             100m (1%)     0 (0%)      0 (0%)           0 (0%)         29m
+  llm-gateway                 litellm-f8f86fdb5-p2hzm                          100m (1%)     0 (0%)      256Mi (2%)       2Gi (21%)      5m59s
+  llm-gateway                 litellm-postgresql-0                             50m (0%)      0 (0%)      192Mi (1%)       512Mi (5%)     5m59s
+  llm-gateway                 llm-ingress-nginx-786c5bf496-xtlrp               0 (0%)        0 (0%)      0 (0%)           0 (0%)         29m
+  llm-serving                 host-bridge-647b668798-f5q4b                     25m (0%)      0 (0%)      32Mi (0%)        128Mi (1%)     29m
+  llm-serving                 mock-backend-79b4f6477c-6wd8q                    25m (0%)      0 (0%)      32Mi (0%)        128Mi (1%)     28m
+  llm-serving                 mock-backend-79b4f6477c-grf4n                    25m (0%)      0 (0%)      32Mi (0%)        128Mi (1%)     28m
+  llm-serving                 primary-pool-epp-74448d9c74-whlz7                50m (0%)      0 (0%)      64Mi (0%)        256Mi (2%)     27m
+  local-path-storage          local-path-provisioner-7b8c8ddbd6-vxxrl          0 (0%)        0 (0%)      0 (0%)           0 (0%)         29m
+  nginx-gateway               ngf-nginx-gateway-fabric-56dfc4fb5-qz7jg         50m (0%)      0 (0%)      64Mi (0%)        0 (0%)         29m
 Allocated resources:
   (Total limits may be over 100 percent, i.e., overcommitted.)
-  Resource           Requests      Limits
-  --------           --------      ------
-  cpu                3235m (53%)   3100m (51%)
-  memory             3810Mi (39%)  7942Mi (82%)
-  ephemeral-storage  0 (0%)        0 (0%)
-  hugepages-1Gi      0 (0%)        0 (0%)
-  hugepages-2Mi      0 (0%)        0 (0%)
-  hugepages-32Mi     0 (0%)        0 (0%)
-  hugepages-64Ki     0 (0%)        0 (0%)
+  Resource           Requests     Limits
+  --------           --------     ------
+  cpu                1275m (21%)  100m (1%)
+  memory             962Mi (9%)   3590Mi (37%)
+  ephemeral-storage  0 (0%)       0 (0%)
+  hugepages-1Gi      0 (0%)       0 (0%)
+  hugepages-2Mi      0 (0%)       0 (0%)
+  hugepages-32Mi     0 (0%)       0 (0%)
+  hugepages-64Ki     0 (0%)       0 (0%)
 Events:
-  Type    Reason                   Age    From             Message
-  ----    ------                   ----   ----             -------
-  Normal  Starting                 4m27s  kube-proxy       
-  Normal  Starting                 4m34s  kubelet          Starting kubelet.
-  Normal  NodeAllocatableEnforced  4m34s  kubelet          Updated Node Allocatable limit across pods
-  Normal  NodeHasSufficientMemory  4m34s  kubelet          Node llm-lab-control-plane status is now: NodeHasSufficientMemory
-  Normal  NodeHasNoDiskPressure    4m34s  kubelet          Node llm-lab-control-plane status is now: NodeHasNoDiskPressure
-  Normal  NodeHasSufficientPID     4m34s  kubelet          Node llm-lab-control-plane status is now: NodeHasSufficientPID
-  Normal  RegisteredNode           4m29s  node-controller  Node llm-lab-control-plane event: Registered Node llm-lab-control-plane in Controller
-  Normal  NodeReady                4m17s  kubelet          Node llm-lab-control-plane status is now: NodeReady
+  Type     Reason                   Age                From             Message
+  ----     ------                   ----               ----             -------
+  Normal   Starting                 29m                kube-proxy       
+  Normal   NodeAllocatableEnforced  30m                kubelet          Updated Node Allocatable limit across pods
+  Warning  SystemOOM                30m                kubelet          System OOM encountered, victim process: python, pid: 575972
+  Warning  SystemOOM                30m                kubelet          System OOM encountered, victim process: python, pid: 578453
+  Warning  SystemOOM                30m                kubelet          System OOM encountered, victim process: python, pid: 579863
+  Normal   NodeHasSufficientMemory  30m (x8 over 30m)  kubelet          Node llm-lab-control-plane status is now: NodeHasSufficientMemory
+  Normal   NodeHasNoDiskPressure    30m (x8 over 30m)  kubelet          Node llm-lab-control-plane status is now: NodeHasNoDiskPressure
+  Normal   NodeHasSufficientPID     30m (x7 over 30m)  kubelet          Node llm-lab-control-plane status is now: NodeHasSufficientPID
+  Normal   Starting                 30m                kubelet          Starting kubelet.
+  Warning  SystemOOM                29m                kubelet          System OOM encountered, victim process: python, pid: 578453
+  Normal   Starting                 29m                kubelet          Starting kubelet.
+  Warning  SystemOOM                29m                kubelet          System OOM encountered, victim process: python, pid: 575972
+  Warning  SystemOOM                29m                kubelet          System OOM encountered, victim process: python, pid: 579863
+  Normal   NodeAllocatableEnforced  29m                kubelet          Updated Node Allocatable limit across pods
+  Normal   NodeHasSufficientMemory  29m                kubelet          Node llm-lab-control-plane status is now: NodeHasSufficientMemory
+  Normal   NodeHasNoDiskPressure    29m                kubelet          Node llm-lab-control-plane status is now: NodeHasNoDiskPressure
+  Normal   NodeHasSufficientPID     29m                kubelet          Node llm-lab-control-plane status is now: NodeHasSufficientPID
+  Normal   RegisteredNode           29m                node-controller  Node llm-lab-control-plane event: Registered Node llm-lab-control-plane in Controller
+  Normal   NodeReady                29m                kubelet          Node llm-lab-control-plane status is now: NodeReady

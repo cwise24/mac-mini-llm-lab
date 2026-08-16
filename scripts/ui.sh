@@ -13,8 +13,10 @@ svc="$(kctl -n llm-gateway get svc ai-gateway -o jsonpath='{.metadata.labels.llm
 
 case "${svc}" in
   litellm)
-    target="svc/litellm"; path="/ui"
-    note="log in with the master key: sk-llm-lab-local" ;;
+    # Trailing slash is REQUIRED. /ui alone does not load; see the redirect rule
+    # in manifests/ingress/ngf/gateway.yaml.
+    target="svc/litellm"; path="/ui/"
+    note="login -> username: admin   password: sk-llm-lab-local" ;;
   bifrost)
     target="svc/bifrost"; path="/"
     note="no auth by default in this lab's config" ;;

@@ -53,6 +53,28 @@ spec:
             - --grpc-health-port=9003
             - --metrics-port=9090
             - -v=3
+            # DO NOT add --secure-serving=false here. Tried it -- see
+            # docs/HomeLab_Runbook_v1.md for the full story, short version below.
+            #
+            # This EPP defaults to secure-serving=true (GIE v1.5.0) with no
+            # certificate mounted anywhere in this manifest. Under GATEWAY=ngf-llmd,
+            # NGF's endpoint-picker-shim gets "error reading server preface: EOF"
+            # talking to it and silently falls back to round-robin over the raw
+            # Service, so `make smoke` passes while the EPP is never actually
+            # consulted -- confirmed via `make logs-epp` showing zero scheduling
+            # decisions during a run that returned real chat completions.
+            #
+            # Adding --secure-serving=false "fixes" that (EPP genuinely scores
+            # requests, verified via /v1/completions and real scheduler logs) but
+            # BREAKS GATEWAY=envoy, which was already working and IS verified:
+            # Envoy AI Gateway's ext_proc client speaks genuine TLS to this same
+            # EPP and a plaintext EPP fails it with
+            #   TLS_error: ...WRONG_VERSION_NUMBER
+            # i.e. the two gateways want opposite wire protocols from one shared
+            # EPP Deployment, and there is no per-Gateway override for it. Envoy's
+            # working path is the one to protect. Left as a known, reproduced,
+            # NOT fixed defect in GATEWAY=ngf-llmd rather than trading a working
+            # mode for a broken one.
           # EXPECTED LOG NOISE, do not chase it:
           #   extract failed ... metric family "vllm:lora_requests_info" not found
           #
@@ -88,6 +110,12 @@ kind: Service
 metadata:
   name: primary-pool-epp
   namespace: llm-serving
+  # ServiceMonitor.spec.selector matches labels on the SERVICE object, not on
+  # the pods it selects for -- `spec.selector` above is the latter. Without
+  # this, manifests/observability's ServiceMonitor matches zero Services and
+  # the inference-scheduler scrape job has zero targets, not a `down` one, so
+  # it fails silently rather than complaining about missing credentials.
+  labels: { app: primary-pool-epp }
 spec:
   selector: { app: primary-pool-epp }
   # ext_proc is HTTP/2; without this appProtocol Envoy will downgrade and fail

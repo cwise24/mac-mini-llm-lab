@@ -175,8 +175,25 @@ install_bifrost() {
     "app.kubernetes.io/instance=bifrost" 8080
 }
 
-install_none() {
-  log "no AI gateway: NGF -> InferencePool directly"
+install_ngf_llmd() {
+  # NGF AS the inference gateway -- no separate AI gateway tier.
+  #
+  # NGF implements the Gateway API Inference Extension, so an HTTPRoute can carry
+  # an InferencePool as a backendRef and NGF consults the llm-d Endpoint Picker
+  # itself over ext_proc. This is the shortest path in the lab: one proxy, one
+  # scheduling decision, no second hop.
+  #
+  # Requires nginxGateway.gwAPIInferenceExtension.enable=true at install time
+  # (set in up.sh) and the GIE CRDs. Without the flag NGF cannot resolve the
+  # backendRef and the HTTPRoute reports ResolvedRefs=False.
+  log "NGF as inference gateway: NGF -> InferencePool -> vLLM (llm-d EPP in path)"
+
+  if ! kctl -n nginx-gateway get deploy -o yaml 2>/dev/null \
+       | grep -q "gateway-api-inference-extension"; then
+    warn "NGF was installed WITHOUT --gateway-api-inference-extension."
+    warn "  The InferencePool backendRef will not resolve. Fix with:"
+    warn "      make up      (re-runs the NGF install with the flag)"
+  fi
   kctl apply -f "${REPO_ROOT}/manifests/ingress/ngf/httproute-direct.yaml"
   kctl delete httproute ai-gateway-route -n llm-gateway --ignore-not-found
 }
@@ -195,11 +212,11 @@ case "${TARGET}" in
   envoy)   install_envoy   ;;
   litellm) install_litellm ;;
   bifrost) install_bifrost ;;
-  none)    install_none    ;;
-  *) die "unknown gateway '${TARGET}' (envoy|litellm|bifrost|none)" ;;
+  ngf-llmd|none)  install_ngf_llmd ;;
+  *) die "unknown gateway '${TARGET}' (envoy|litellm|bifrost|ngf-llmd)" ;;
 esac
 
-if [[ "${TARGET}" != "none" ]]; then
+if [[ "${TARGET}" != "none" && "${TARGET}" != "ngf-llmd" ]]; then
   kctl apply -f "${REPO_ROOT}/manifests/ingress/ngf/gateway.yaml"
 fi
 
@@ -250,11 +267,14 @@ cat <<'CURL'
 CURL
 echo
 case "${TARGET}" in
-  litellm) echo "  Web UI:  make ui   ->  http://localhost:8090/ui  (key: sk-llm-lab-local)" ;;
-  bifrost) echo "  Web UI:  make ui   ->  http://localhost:8090/" ;;
+  litellm) echo "  Web UI:  http://localhost:8080/ui/     <- trailing slash required"
+           echo "           login: admin / sk-llm-lab-local" ;;
+  bifrost) echo "  Web UI:  http://localhost:8080/" ;;
   envoy)   echo "  Web UI:  none -- Envoy AI Gateway is configured through CRDs."
            echo "           Inspect:  kubectl get aigatewayroute,aiservicebackend -n llm-gateway" ;;
-  none)    echo "  Web UI:  none -- NGF routes straight to the InferencePool." ;;
+  ngf-llmd|none)
+           echo "  Web UI:  none -- NGF is the gateway; llm-d does the routing."
+           echo "           Watch decisions:  make logs-epp" ;;
 esac
 echo
 echo "  Verify:  make smoke"

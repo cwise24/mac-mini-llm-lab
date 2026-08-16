@@ -2,7 +2,7 @@
 # Fails fast on the things that actually break this lab, before anything is built.
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
-log "preflight (runtime: ${CONTAINER_CLI})"
+log "preflight (runtime: ${CONTAINER_CLI}, kind provider: ${KIND_EXPERIMENTAL_PROVIDER:-docker})"
 fail=0
 
 for t in "${CONTAINER_CLI}" kind kubectl helm jq python3; do
@@ -14,12 +14,13 @@ ctr info >/dev/null 2>&1 || { warn "${CONTAINER_CLI} not reachable -- is the mac
 
 ok "host arch: $(uname -m)"
 if [[ "$(uname -m)" == "arm64" ]]; then
-  ok "Apple Silicon: in-cluster inference is CPU-only (no Metal passthrough into the podman VM)"
+  ok "Apple Silicon: in-cluster inference is CPU-only (no Metal passthrough into the ${CONTAINER_CLI} VM)"
 fi
 
-if [[ "${CONTAINER_CLI}" == "podman" ]]; then
-  # Rootless podman + kind needs cgroup v2 delegation that podman machine does not
-  # set up by default. Symptom is kubelet failing on cpu/memory controllers.
+if runtime_uses_machine; then
+  # Rootless podman + kind needs cgroup v2 controller delegation that podman
+  # machine does not configure by default. Symptom is kubelet failing on
+  # cpu/memory controllers with an opaque error.
   if ctr machine inspect --format '{{.Rootful}}' 2>/dev/null | grep -qi false; then
     warn "podman machine is ROOTLESS. kind is unreliable here."
     warn "  fix: podman machine stop && podman machine set --rootful && podman machine start"
@@ -32,8 +33,10 @@ if [[ "${CONTAINER_CLI}" == "podman" ]]; then
   cpus="$(ctr machine inspect --format '{{.Resources.CPUs}}' 2>/dev/null | head -1 || echo 0)"
   mem_gb=$(( ${mem_mb:-0} / 1024 ))
 else
-  mem_gb=$(( $(ctr info --format '{{.MemTotal}}') / 1024 / 1024 / 1024 ))
-  cpus="$(ctr info --format '{{.NCPU}}')"
+  # Docker Desktop: resources come from its own settings, not a machine spec.
+  mem_gb=$(( $(ctr info --format '{{.MemTotal}}' 2>/dev/null || echo 0) / 1024 / 1024 / 1024 ))
+  cpus="$(ctr info --format '{{.NCPU}}' 2>/dev/null || echo 0)"
+  ok "docker daemon reachable"
 fi
 
 ok "VM memory: ${mem_gb} GB   cpus: ${cpus}"
@@ -103,8 +106,8 @@ do
   if [[ -f "${authfile}" ]] && grep -q 'ghcr\.io' "${authfile}" 2>/dev/null; then
     warn "ghcr.io credentials found in ${authfile}"
     warn "  if they are expired, public pulls fail with 403 denied."
-    warn "  helm calls already force anonymous; for podman image pulls run:"
-    warn "    podman logout ghcr.io"
+    warn "  helm calls already force anonymous; for image pulls run:"
+    warn "    ${CONTAINER_CLI} logout ghcr.io"
   fi
 done
 

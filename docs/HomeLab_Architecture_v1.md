@@ -108,7 +108,19 @@ The nginx config disables `proxy_buffering`. Without that, SSE token deltas accu
 
 Extra kind workers cost roughly 600 MB each in kubelet and containerd overhead and buy nothing: there is one physical machine and no real failure domain to spread across. The node carries `llm-lab.io/pool` and `llm-lab.io/accelerator` labels so manifests can *express* placement intent — which means adding a real GPU node later is a label change, not a rewrite.
 
-### 3.6 Podman specifics
+### 3.6 Runtime portability, and its one sharp edge
+
+The lab runs on podman or docker. `CONTAINER_CLI` is the only setting; the kind
+provider and the host-access name are derived from it, because those three must
+agree and independent settings drift.
+
+What does **not** move with you: the cluster and the local registry. kind clusters
+are runtime-scoped, and switching while one is live orphans it — running, holding
+disk and port 8080, invisible to `kind get clusters`. Since the failure leaves no
+error to notice, the switch is gated on the cluster being gone rather than
+documented and hoped for. `make orphans` audits both runtimes.
+
+### 3.7 Podman specifics
 
 Podman is not a drop-in for Docker here. Four differences bite:
 
@@ -155,6 +167,8 @@ Being precise about this matters more than the lab working.
 **Not real:** Inference speed. GPU scheduling and the device plugin path. Prefill/decode disaggregation and NIXL KV transfer. Multi-node KV-cache locality. Anything about scale.
 
 The gap is deliberate and it is the right gap. Every skill in the first list transfers unchanged to a GPU cluster. Nothing in the second list can be learned on this hardware at any price, so simulating it would teach you something false.
+
+**Amendment, verified 2026-08-15/16 — "real" is not uniformly true across every gateway.** The EPP-scoring claim above is accurate for `GATEWAY=envoy`, confirmed both on 2026-08-10 and again in this pass. It is currently **false for `GATEWAY=ngf-llmd`**: a TLS mismatch between NGF's ext_proc client and the EPP means the EPP is never consulted under that mode, and NGF's silent fallback to plain load balancing on ext_proc failure means `make smoke` cannot detect it — the request path *looks* real (successful chat completions, correct model, real vLLM tokens) while the scheduling decision behind it is not. This is not a simulation-vs-real gap the way GPU scheduling is; it is a genuine, unresolved bug in a component the architecture correctly identifies as real. Full diagnosis, what was tried, and why it was left unfixed rather than traded for a regression in the working `envoy` path: `docs/HomeLab_Runbook_v1.md`, "`GATEWAY=ngf-llmd` looks green but the EPP is never consulted." A second, independent defect layers on top of the first: even with the EPP genuinely reachable, GIE v1.5.0's request parser rejects the OpenAI chat-completions format entirely (`/v1/completions` with a `prompt` field works; `/v1/chat/completions` with `messages` does not), so this repo's single shared smoke test cannot currently prove EPP behaviour for this mode under any circumstance — a second gateway-specific probe (`/v1/completions`) is required, documented in the same runbook entry.
 
 ---
 

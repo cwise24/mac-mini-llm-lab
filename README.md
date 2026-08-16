@@ -3,6 +3,7 @@
 Kubernetes-native LLM serving lab for an Apple Silicon Mac mini: **kind on podman**, **NGINX Gateway Fabric** ingress, **swappable AI gateways** (Envoy AI Gateway / LiteLLM / Bifrost), and the **llm-d scheduling plane** over real vLLM CPU backends plus a Metal-accelerated host engine.
 
 ```bash
+make use-podman   # or: make use-docker   -- see Setup below
 make init && make preflight
 make bootstrap PROFILE=lite      # ~3 min, validates the whole path
 make bootstrap PROFILE=standard  # real vLLM (build the image first)
@@ -36,6 +37,36 @@ docs/
   HomeLab_Architecture_v1.md design, tradeoffs, what is real and what is not
   HomeLab_Runbook_v1.md      setup, exercises, troubleshooting
 ```
+
+## Setup
+
+Runs on **podman or docker** — pick one and follow only that section of the
+runbook. They are deliberately kept separate because the setup steps differ and
+mixing them is the main way this goes wrong.
+
+- **[Setup A — Podman](docs/HomeLab_Runbook_v1.md#setup-a--podman)**
+- **[Setup B — Docker](docs/HomeLab_Runbook_v1.md#setup-b--docker)**
+
+> **Switching between them later?** Read
+> [Switching runtimes](docs/HomeLab_Runbook_v1.md#switching-runtimes-read-before-you-do-it)
+> first. `make down` **before** you switch — kind clusters are not portable, and
+> switching with one running orphans it silently: still holding disk and port
+> 8080, but invisible to every command here. `make orphans` finds strays.
+
+```bash
+make down       # delete the cluster; keeps registry + vLLM image
+make nuke       # delete cluster, registry and cached charts
+make orphans    # report resources under EITHER runtime
+```
+
+## Observability
+
+```bash
+make observability     # kube-prometheus-stack + vLLM dashboard (~700 Mi)
+```
+
+Grafana at <http://localhost:9090> (`admin` / `llm-lab`), Prometheus via
+`make prom`. Opt-in, never part of `make bootstrap`.
 
 ## Read this before running anything
 

@@ -94,8 +94,16 @@ kubectl kustomize \
   "https://github.com/nginx/nginx-gateway-fabric/config/crd/gateway-api/${GWAPI_CHANNEL}?ref=v${NGF_VERSION}" \
   | kapply_crds -f -
 
-log "installing Gateway API Inference Extension ${GIE_VERSION}"
-kapply_crds -f "https://github.com/kubernetes-sigs/gateway-api-inference-extension/releases/download/${GIE_VERSION}/manifests.yaml"
+# Inference Extension CRDs, from NGF's own pinned kustomize.
+#
+# NGF v2.6.7 pins GIE v1.5.0, which is also what llm-d v0.8.0 vendors, so all
+# three agree. Taking the CRDs from NGF's ref rather than a GIE release keeps
+# that guarantee if NGF is bumped: the pin moves with the gateway that has to
+# understand the resources.
+log "installing Gateway API Inference Extension CRDs (pinned by NGF v${NGF_VERSION})"
+kubectl kustomize \
+  "https://github.com/nginx/nginx-gateway-fabric/config/crd/inference-extension/?ref=v${NGF_VERSION}" \
+  | kapply_crds -f -
 
 log "creating namespaces"
 kctl apply -k "${REPO_ROOT}/manifests/base"
@@ -138,7 +146,7 @@ NGF_VALUES=(
   --set nginx.config.dnsResolver.addresses[0].type=IPAddress
   --set nginx.config.dnsResolver.addresses[0].value="${CLUSTER_DNS_IP}"
 
-  # Gateway API Inference Extension support -- what GATEWAY=none actually needs.
+  # Gateway API Inference Extension support -- what GATEWAY=ngf-llmd actually needs.
   #
   # This is a SEPARATE switch from gwAPIExperimentalFeatures below, and both are
   # off by default. Without it NGF simply does not understand an InferencePool
@@ -148,18 +156,49 @@ NGF_VALUES=(
   # even though the pool is right there in the same namespace, which reads like
   # the pool is missing rather than like a feature being disabled.
   --set nginxGateway.gwAPIInferenceExtension.enable=true
-  # NGF speaks TLS to the EndpointPicker by default. The EPP in
-  # manifests/scheduler/llm-d/ serves plaintext gRPC on 9002 with no certificate
-  # mounted, so leaving this on makes every request fail at the ext_proc hop.
-  # Fine for a single-node lab; revisit alongside a service mesh or real certs.
+  # This asserts the EPP in manifests/scheduler/llm-d/ "serves plaintext gRPC
+  # on 9002 with no certificate mounted". That was never checked against the
+  # EPP's actual startup flags and is only half true: it mounts no cert, but
+  # it still defaults to `secure-serving=true` (GIE v1.5.0; confirmed via
+  # `make logs-epp` -> "Flags processed" -> "secure-serving":true) and cannot
+  # complete a handshake either way. With disableTLS=true (this line), NGF's
+  # endpoint-picker-shim gets "error reading server preface: EOF" and every
+  # ext_proc stream fails -- silently, because NGF's njs routing falls back to
+  # plain round-robin over the InferencePool's raw Service rather than
+  # erroring the request. `make smoke` passes throughout (chat completion
+  # still works via the fallback), which is how this stayed undiscovered:
+  # GATEWAY=ngf-llmd looked green while the EPP was never actually consulted.
+  # Caught only in the Phase 3 multi-endpoint exercise, where mock backends
+  # made the fallback's round-robin visible as an even split instead of
+  # scheduler convergence.
+  #
+  # disableTLS=false (the chart's own default) does not fix it either -- the
+  # EPP resets the connection ("connection reset by peer") since it has no
+  # cert to complete a TLS handshake with regardless of what the client
+  # trusts; `skipVerify` only relaxes CLIENT-side validation.
+  #
+  # The only combination that made NGF's ext_proc calls genuinely work was
+  # symmetric plaintext: this line PLUS --secure-serving=false added to the
+  # EPP's own args. Verified via `make logs-epp` showing real scheduler
+  # decisions against a 3-endpoint pool. But that combination was reverted --
+  # it breaks GATEWAY=envoy, which is already verified working and depends on
+  # the EPP staying TLS: Envoy AI Gateway's ext_proc client speaks genuine TLS
+  # to this same shared EPP, and gets
+  #   TLS_error: ...WRONG_VERSION_NUMBER
+  # against a plaintext one. The two gateways want opposite wire protocols
+  # from one EPP Deployment with no per-Gateway override for it. Envoy's
+  # working path is the one to protect, so this stays disableTLS=true (EPP
+  # still secure-serving=true, default) and GATEWAY=ngf-llmd's EPP integration
+  # stays a known, reproduced, NOT fixed defect -- see
+  # docs/HomeLab_Runbook_v1.md and manifests/scheduler/llm-d/inferencepool.yaml.
   --set nginxGateway.gwAPIInferenceExtension.endpointPicker.disableTLS=true
 )
 
-# InferencePool as an HTTPRoute backendRef (GATEWAY=none) is an experimental
+# InferencePool as an HTTPRoute backendRef (GATEWAY=ngf-llmd) is an experimental
 # Gateway API feature and needs both the experimental CRDs and this flag.
 if [[ "${GWAPI_CHANNEL}" == "experimental" ]]; then
   NGF_VALUES+=(--set nginxGateway.gwAPIExperimentalFeatures.enable=true)
-  ok "experimental Gateway API features enabled (required for GATEWAY=none)"
+  ok "experimental Gateway API features enabled (required for GATEWAY=ngf-llmd)"
 fi
 
 install_ngf_oci() {

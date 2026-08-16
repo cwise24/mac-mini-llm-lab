@@ -52,6 +52,28 @@ run kctl get inferencepool -A
 sec "recent events"
 run bash -c 'kubectl --context kind-'"${CLUSTER_NAME}"' get events -A --sort-by=.lastTimestamp 2>/dev/null | tail -40'
 
+sec "jobs (schema migrations)"
+# The LiteLLM migration Job carries ttlSecondsAfterFinished: 120, so a SUCCEEDED
+# job vanishes two minutes later. Absence here is ambiguous: it may have
+# succeeded and been reaped, or never been created at all. The events section
+# below distinguishes them.
+run kctl -n llm-gateway get jobs -o wide
+run kctl -n llm-gateway describe jobs
+run bash -c 'kubectl --context kind-'"${CLUSTER_NAME}"' -n llm-gateway logs -l job-name --tail=60 --all-containers 2>&1 | tail -80'
+
+sec "litellm + postgres pods"
+run bash -c 'kubectl --context kind-'"${CLUSTER_NAME}"' -n llm-gateway get pods -o wide 2>&1'
+run bash -c 'kubectl --context kind-'"${CLUSTER_NAME}"' -n llm-gateway logs -l app.kubernetes.io/name=postgresql --tail=30 2>&1'
+run bash -c 'kubectl --context kind-'"${CLUSTER_NAME}"' -n llm-gateway logs deploy/litellm --tail=60 2>&1'
+
+sec "litellm env wiring (passwords redacted)"
+# DISABLE_SCHEMA_UPDATE=true on the proxy is EXPECTED when migrationJob.enabled
+# is true -- the chart makes the Job solely responsible for the schema. It only
+# becomes a problem if the Job did not run.
+run bash -c "kubectl --context kind-${CLUSTER_NAME} -n llm-gateway get deploy litellm \
+  -o jsonpath='{range .spec.template.spec.containers[0].env[*]}{.name}={.value}{\"\\n\"}{end}' 2>/dev/null \
+  | grep -Ei 'DATABASE|SCHEMA|MASTER' | sed -E 's#://[^@]*@#://REDACTED@#'"
+
 sec "helm releases"
 run helm list -A --kube-context "kind-${CLUSTER_NAME}"
 

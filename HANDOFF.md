@@ -107,6 +107,16 @@ manifest alone.
    raise `VLLM_REPLICAS` only alongside VM memory, then send prefix-sharing
    concurrent requests and watch `make logs-epp` converge on one endpoint.
 
+## Runtime and cleanup
+
+`CONTAINER_CLI` in `.env` selects podman or docker; `KIND_EXPERIMENTAL_PROVIDER`
+and `HOST_INTERNAL_NAME` are DERIVED in lib.sh and must not be set by hand.
+
+Always `make down` before `make use-docker` / `make use-podman`. kind clusters do
+not survive a runtime switch — they are orphaned silently, still consuming disk
+and port 8080 while invisible to kind. The switch targets refuse unless the
+cluster is gone (`FORCE=1` overrides). `make orphans` audits both runtimes.
+
 ## Ground rules
 
 - Fix root causes in the repo, not by hand in the cluster. Every fix must

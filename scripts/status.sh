@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
+echo; log "runtime"
+printf '    %-14s %s\n' "engine" "${CONTAINER_CLI}"
+printf '    %-14s %s\n' "kind provider" "${KIND_EXPERIMENTAL_PROVIDER:-docker (default)}"
+printf '    %-14s %s\n' "host name" "${HOST_INTERNAL_NAME}"
+
 echo; log "cluster"
 kctl get nodes -o wide 2>/dev/null || { warn "cluster not reachable"; exit 0; }
 
