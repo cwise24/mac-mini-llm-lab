@@ -1,0 +1,68 @@
+# Tell the Prometheus Operator where the inference metrics are.
+#
+# The vLLM pods already carry prometheus.io/scrape annotations, but those are a
+# convention understood by a hand-written Prometheus scrape config -- the
+# operator ignores them entirely and discovers targets through PodMonitor and
+# ServiceMonitor resources instead. This is the main conceptual difference
+# between the operator pattern and a plain Prometheus, and the reason the
+# annotations alone produce zero targets.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: vllm-cpu
+  namespace: llm-observability
+  labels:
+    # Belt and braces: values.yaml sets podMonitorSelectorNilUsesHelmValues=false
+    # so this label is not required, but carrying it means the monitor is still
+    # selected if someone reverts that setting.
+    release: kps
+spec:
+  namespaceSelector:
+    matchNames: [llm-serving]
+  selector:
+    matchLabels:
+      llm-lab.io/backend: vllm-cpu
+  podMetricsEndpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+---
+# The Endpoint Picker exposes its own scheduling metrics on 9090 -- queue depth
+# and scoring decisions. Worth graphing next to vLLM's, since the whole point of
+# llm-d is that those two are related.
+#
+# ServiceMonitor, not PodMonitor, and that choice is load-bearing. GIE v1.5.0's
+# EPP runs with --metrics-endpoint-auth (the "Flags processed" startup log
+# shows "metrics-endpoint-auth":true) and validates the scrape's bearer token
+# via TokenReview/SubjectAccessReview against the API server -- the EPP's own
+# ClusterRole in inferencepool.yaml grants it exactly those two verbs. Without
+# a token this target is `down` with a plain 401, which reads like a broken
+# scrape config rather than an auth requirement, since the EPP has no flag to
+# turn it off (unlike --lora-info-metric). kube-prometheus-stack's own
+# kubelet/cAdvisor ServiceMonitors hit the same wall and fix it with
+# `bearerTokenFile: .../serviceaccount/token`, pointing at Prometheus's own
+# mounted token -- but that field was DROPPED from PodMonitor's CRD schema
+# (still present, deprecated, on ServiceMonitor's) while this repo was
+# written assuming API parity between the two kinds. `kubectl apply` fails
+# server-side with "unknown field spec.podMetricsEndpoints[0].bearerTokenFile"
+# rather than a schema warning, which is at least honest about it. The
+# `primary-pool-epp` Service in inferencepool.yaml already fronts port
+# `metrics`, so ServiceMonitor needs no new resource, just this swap.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: inference-scheduler
+  namespace: llm-observability
+  labels:
+    release: kps
+spec:
+  namespaceSelector:
+    matchNames: [llm-serving]
+  selector:
+    matchLabels:
+      app: primary-pool-epp
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 15s
+      bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token

@@ -33,6 +33,61 @@ load_env "${STATE_DIR}/vllm-image.env"
 load_env "${REPO_ROOT}/.env"
 load_env "${REPO_ROOT}/.env.example"
 
+# Fail clearly when NO config was found at all.
+if [[ ! -f "${REPO_ROOT}/.env" && ! -f "${REPO_ROOT}/.env.example" ]]; then
+  printf '\033[1;31m[x]\033[0m %s\n' "no .env or .env.example in ${REPO_ROOT}" >&2
+  printf '    %s\n' "restore .env.example from git, then: make init" >&2
+  exit 1
+fi
+
+# Defaults for EVERY key the scripts read.
+#
+# lib.sh runs under `set -u`, so any variable a script touches that the config
+# file happens not to define aborts with "VAR: unbound variable" and a line
+# number -- which points at the reader, never at the missing key. That is what a
+# partial, stale, or half-written .env produces: a crash that describes nothing.
+#
+# These defaults make config keys optional rather than load-bearing. A .env from
+# an older revision of this repo still works; it just picks up new keys from
+# here. Anything genuinely required (nothing currently) should be asserted
+# explicitly with a message, not left to `set -u`.
+: "${PROFILE:=standard}"
+: "${GATEWAY:=envoy}"
+: "${CLUSTER_NAME:=llm-lab}"
+: "${KIND_NODE_IMAGE:=kindest/node:v1.34.0}"
+: "${REGISTRY_NAME:=kind-registry}"
+: "${REGISTRY_PORT:=5001}"
+
+: "${VLLM_MODEL:=Qwen/Qwen2.5-0.5B-Instruct}"
+: "${VLLM_SERVED_NAME:=qwen-small}"
+: "${VLLM_REPLICAS:=1}"
+: "${VLLM_MAX_MODEL_LEN:=2048}"
+: "${VLLM_IMAGE:=localhost:${REGISTRY_PORT}/vllm-cpu:latest}"
+: "${VLLM_UPSTREAM_IMAGE:=docker.io/mekayelanik/vllm-cpu:latest}"
+: "${VLLM_REF:=v0.11.0}"
+
+: "${HOST_ENGINE_PORT:=11434}"
+: "${HOST_ENGINE_MODEL:=llama3.2:3b}"
+
+: "${NGF_VERSION:=2.6.7}"
+: "${NGF_GATEWAY_CLASS:=nginx}"
+: "${NGF_INSTALL_METHOD:=}"
+: "${CHART_INSTALL_METHOD:=auto}"
+: "${GWAPI_CHANNEL:=experimental}"
+
+: "${GIE_VERSION:=v1.5.0}"
+: "${ENVOY_GATEWAY_VERSION:=v1.5.6}"
+: "${ENVOY_AI_GATEWAY_VERSION:=v1.0.0}"
+: "${LITELLM_WITH_DB:=false}"
+: "${LITELLM_CHART_VERSION:=1.1.1}"
+: "${LITELLM_CHART_REF:=main}"
+: "${BIFROST_CHART_VERSION:=2.1.33}"
+: "${BIFROST_CHART_REF:=dev}"
+
+: "${EPP_IMAGE:=ghcr.io/llm-d/llm-d-inference-scheduler:v0.8.0}"
+: "${NGINX_IMAGE:=nginx:1.27-alpine}"
+: "${MOCK_IMAGE:=ghcr.io/berriai/litellm:main-stable}"
+
 # Message helpers are defined FIRST because detect_runtime() below calls die()
 # when the configured runtime is invalid. Defining them after would turn a clear
 # "CONTAINER_CLI must be docker or podman" into "die: command not found".
@@ -146,14 +201,10 @@ wait_rollout() {
 }
 
 render() { # render <template> <out> ; substitutes __VAR__ tokens from the environment
-  local tpl="$1" out="$2"
-  python3 - "$tpl" "$out" <<'PY'
-import os,re,sys
-tpl,out=sys.argv[1],sys.argv[2]
-s=open(tpl).read()
-s=re.sub(r'__([A-Z0-9_]+)__', lambda m: os.environ.get(m.group(1), m.group(0)), s)
-open(out,'w').write(s)
-PY
+  # Delegates to scripts/render.py, which FAILS on unresolved tokens rather than
+  # emitting them literally into a helm values file. See that file for why.
+  python3 "${REPO_ROOT}/scripts/render.py" "$1" "$2" \
+    || die "render failed for $1 (unresolved tokens above)"
 }
 
 # Publish the swap contract: Service/ai-gateway in llm-gateway on :8080.
@@ -161,6 +212,25 @@ PY
 # The upstream name is DISCOVERED, never guessed. Envoy Gateway appends a hash to
 # its data-plane Service, and Helm fullname templates vary by release name, so a
 # hardcoded externalName is a coin flip.
+#
+# TWO strategies, and the choice matters for web UIs:
+#
+#   same namespace  -> clone the upstream Service's SELECTOR into a real
+#                      ClusterIP Service. NGF then proxies straight to the pods
+#                      and the browser's Host header survives intact.
+#
+#   cross namespace  -> ExternalName, because a Service can only select pods in
+#                      its own namespace.
+#
+# Why not ExternalName everywhere: nginx resolves it and forwards with
+# `Host: <svc>.<ns>.svc.cluster.local`. Apps that build absolute URLs from the
+# Host header -- LiteLLM's admin UI does, Bifrost's dashboard does -- then hand
+# the browser links to an in-cluster FQDN it cannot resolve. The API keeps working
+# because API clients ignore Host; only the UI breaks, which makes it look like a
+# UI bug rather than a routing one.
+#
+# Envoy AI Gateway is the only cross-namespace case, and it has no UI, so the
+# ExternalName fallback costs nothing.
 publish_ai_gateway() { # publish_ai_gateway <namespace> <label-selector> [port]
   local ns="$1" sel="$2" port="${3:-8080}" svc=""
   for _ in $(seq 1 30); do
@@ -176,7 +246,45 @@ publish_ai_gateway() { # publish_ai_gateway <namespace> <label-selector> [port]
   [[ -n "${real_port}" ]] || \
     real_port="$(kctl -n "${ns}" get svc "${svc}" -o jsonpath='{.spec.ports[0].port}')"
 
+  local target_port
+  target_port="$(kctl -n "${ns}" get svc "${svc}" \
+    -o jsonpath='{.spec.ports[?(@.port=='"${real_port}"')].targetPort}' 2>/dev/null || true)"
+  [[ -n "${target_port}" ]] || target_port="${real_port}"
+
   ok "discovered upstream: ${svc}.${ns}:${real_port}"
+
+  # Recreate rather than patch: you cannot convert a Service between ExternalName
+  # and ClusterIP in place, and swapping gateways can change which type is needed.
+  kctl delete svc ai-gateway -n llm-gateway --ignore-not-found >/dev/null 2>&1 || true
+
+  if [[ "${ns}" == "llm-gateway" ]]; then
+    local selector
+    selector="$(kctl -n "${ns}" get svc "${svc}" -o json | jq -c '.spec.selector')"
+    if [[ -n "${selector}" && "${selector}" != "null" ]]; then
+      log "cloning selector so the browser Host header is preserved"
+      python3 - "${selector}" "${target_port}" "${GATEWAY_LABEL:-unknown}" <<'YAML' | kctl apply -f -
+import json, sys
+selector, target, label = json.loads(sys.argv[1]), sys.argv[2], sys.argv[3]
+try: target = int(target)
+except ValueError: pass
+print(json.dumps({
+  "apiVersion": "v1", "kind": "Service",
+  "metadata": {
+    "name": "ai-gateway", "namespace": "llm-gateway",
+    "labels": {"llm-lab.io/gateway": label},
+    "annotations": {"llm-lab.io/note":
+      "selector cloned from the active gateway Service by publish_ai_gateway(); "
+      "real ClusterIP (not ExternalName) so the Host header reaches the app intact"},
+  },
+  "spec": {"type": "ClusterIP", "selector": selector,
+           "ports": [{"name": "http", "port": 8080, "targetPort": target}]},
+}))
+YAML
+      ok "ai-gateway -> ClusterIP over ${svc} pods (Host preserved)"
+      return 0
+    fi
+    warn "Service/${svc} has no selector; falling back to ExternalName"
+  fi
 
   kctl apply -f - <<YAML
 apiVersion: v1
@@ -186,6 +294,8 @@ metadata:
   namespace: llm-gateway
   labels:
     llm-lab.io/gateway: "${GATEWAY_LABEL:-unknown}"
+  annotations:
+    llm-lab.io/note: "cross-namespace upstream; Host header will be rewritten to the FQDN"
 spec:
   type: ExternalName
   externalName: ${svc}.${ns}.svc.cluster.local
@@ -194,83 +304,7 @@ spec:
       port: 8080
       targetPort: ${real_port}
 YAML
-}
-
-# Does the cluster exist? `kind get clusters` alone is not trustworthy here.
-#
-# Under the podman provider it can come back empty even when node containers are
-# present -- a stopped node (podman machine restart), a rootful/rootless split, or
-# a provider-detection hiccup all produce a false negative. The failure mode is
-# nasty: the guard says "no cluster", create runs, and kind aborts with
-# "node(s) already exist" without changing anything, so `make up` can never
-# resume after a mid-run failure. Check the container labels as a second source.
-cluster_exists() {
-  kind get clusters 2>/dev/null | grep -qx "${CLUSTER_NAME}" && return 0
-  ctr ps -a --filter "label=io.x-k8s.kind.cluster=${CLUSTER_NAME}" \
-      --format '{{.Names}}' 2>/dev/null | grep -q . && return 0
-  return 1
-}
-
-cluster_nodes() {
-  ctr ps -a --filter "label=io.x-k8s.kind.cluster=${CLUSTER_NAME}" \
-      --format '{{.Names}}' 2>/dev/null || true
-}
-
-# Bring stopped node containers back and wait for the API server.
-ensure_cluster_running() {
-  local started=0 n
-  while read -r n; do
-    [[ -z "${n}" ]] && continue
-    if [[ "$(ctr inspect -f '{{.State.Running}}' "${n}" 2>/dev/null || echo false)" != "true" ]]; then
-      log "starting stopped node ${n}"
-      ctr start "${n}" >/dev/null && started=1
-    fi
-  done < <(cluster_nodes)
-
-  if (( started )); then
-    log "waiting for the API server to come back"
-    for _ in $(seq 1 60); do
-      kctl get --raw=/readyz >/dev/null 2>&1 && { ok "API server ready"; return 0; }
-      sleep 3
-    done
-    warn "API server did not become ready; try: make down && make up"
-    return 1
-  fi
-
-  kctl get --raw=/readyz >/dev/null 2>&1 \
-    || { warn "cluster exists but the API server is unreachable"; return 1; }
-  return 0
-}
-
-# Helm against public OCI registries, isolated from local credential state.
-#
-# Symptom: `403: denied` fetching a chart that curl can pull anonymously.
-#
-# Mechanism (Helm 4 + ghcr.io): --registry-config only points helm at a different
-# auth FILE. It does not stop the OCI client from resolving credentials through
-# docker's credential helpers -- `credsStore` / `credHelpers` in
-# ~/.docker/config.json, which on macOS pull from the Keychain. An expired ghcr
-# entry there gets attached to the token request, and ghcr answers 403 instead of
-# issuing an anonymous token. The credential never appears in any file you can
-# grep, which is why the file-level bypass looked like it should work and didn't.
-#
-# So isolate DOCKER_CONFIG as well: an empty directory means no auths, no
-# credsStore, no helpers, and the client falls back to a genuine anonymous pull.
-#
-# HELM_USE_HOST_AUTH=1 restores normal credential handling for private charts.
-helm_oci() {
-  if [[ "${HELM_USE_HOST_AUTH:-0}" == "1" ]]; then
-    helm --kube-context "kind-${CLUSTER_NAME}" "$@"
-    return
-  fi
-  local cfg="${STATE_DIR}/helm-anon-registry.json"
-  local dcfg="${STATE_DIR}/anon-docker-config"
-  echo '{"auths":{}}' > "${cfg}"
-  mkdir -p "${dcfg}"; echo '{}' > "${dcfg}/config.json"
-
-  DOCKER_CONFIG="${dcfg}" \
-  HELM_REGISTRY_CONFIG="${cfg}" \
-  helm --kube-context "kind-${CLUSTER_NAME}" --registry-config "${cfg}" "$@"
+  ok "ai-gateway -> ExternalName ${svc}.${ns} (cross-namespace)"
 }
 
 # Install a chart that is published as OCI, falling back to the chart source in
@@ -318,9 +352,133 @@ helm_chart_install() {
   fi
   [[ -d "${src}/${subpath}" ]] || die "chart path not found: ${src}/${subpath}"
 
+  # Fetch subchart dependencies.
+  #
+  # An OCI/repo install ships a packaged chart with its dependencies already
+  # vendored. A git checkout does not -- charts/ is empty until `helm dependency`
+  # populates it, and helm then fails with "found in Chart.yaml, but missing in
+  # charts/ directory". LiteLLM pulls in postgresql this way.
+  if grep -q '^dependencies:' "${src}/${subpath}/Chart.yaml" 2>/dev/null; then
+    log "resolving chart dependencies for ${release}"
+    helm dependency build "${src}/${subpath}" 2>/dev/null \
+      || helm dependency update "${src}/${subpath}" \
+      || warn "dependency resolution failed; install may fail if a subchart is enabled"
+  fi
+
   log "installing ${release} from source tree ${subpath}"
-  helm --kube-context "kind-${CLUSTER_NAME}" upgrade --install "${release}" \
-    "${src}/${subpath}" --namespace "${ns}" --create-namespace "$@"
-  HELM_CHART_METHOD_USED=source
-  ok "${release} installed from source"
+  # This must be an explicit if/then, not a bare statement followed by `ok`.
+  # Callers that try multiple install methods (NGF: oci, source, manifest)
+  # invoke this function as the condition of their own `if`, e.g.
+  # `if "install_ngf_${method}"; then ...`. Bash suspends `set -e` for every
+  # command in a chain that ends up evaluated as an if/while/until condition,
+  # including nested function calls -- so a bare `helm upgrade --install`
+  # failing here would NOT abort under `set -euo pipefail` the way it looks
+  # like it should, and execution would fall through to `ok "... installed
+  # from source"` regardless of whether helm actually succeeded. Confirmed by
+  # interrupting `make up` mid-install (Phase 5 resumability test): helm
+  # printed "Release ngf has been cancelled. Error: context canceled" and the
+  # very next line was still "[OK] ngf installed from source". The OCI branch
+  # above already gets this right; this branch silently did not.
+  if helm --kube-context "kind-${CLUSTER_NAME}" upgrade --install "${release}" \
+       "${src}/${subpath}" --namespace "${ns}" --create-namespace "$@"; then
+    HELM_CHART_METHOD_USED=source
+    ok "${release} installed from source"
+    return 0
+  fi
+  return 1
 }
+
+# ---------------------------------------------------------------- cluster state
+# Does the cluster exist? `kind get clusters` alone is not trustworthy here.
+#
+# Under the podman provider it can come back empty even when node containers are
+# present -- a stopped node, a rootful/rootless split, or a provider-detection
+# hiccup all produce a false negative. Check container labels as a second source.
+cluster_exists() {
+  kind get clusters 2>/dev/null | grep -qx "${CLUSTER_NAME}" && return 0
+  ctr ps -a --filter "label=io.x-k8s.kind.cluster=${CLUSTER_NAME}" \
+      --format '{{.Names}}' 2>/dev/null | grep -q . && return 0
+  return 1
+}
+
+cluster_nodes() {
+  ctr ps -a --filter "label=io.x-k8s.kind.cluster=${CLUSTER_NAME}" \
+      --format '{{.Names}}' 2>/dev/null || true
+}
+
+# Bring stopped node containers back and wait for the API server.
+ensure_cluster_running() {
+  local started=0 n
+  while read -r n; do
+    [[ -z "${n}" ]] && continue
+    if [[ "$(ctr inspect -f '{{.State.Running}}' "${n}" 2>/dev/null || echo false)" != "true" ]]; then
+      log "starting stopped node ${n}"
+      ctr start "${n}" >/dev/null && started=1
+    fi
+  done < <(cluster_nodes)
+
+  if (( started )); then
+    log "waiting for the API server to come back"
+    for _ in $(seq 1 60); do
+      kctl get --raw=/readyz >/dev/null 2>&1 && { ok "API server ready"; return 0; }
+      sleep 3
+    done
+    warn "API server did not become ready; try: make down && make up"
+    return 1
+  fi
+
+  kctl get --raw=/readyz >/dev/null 2>&1 \
+    || { warn "cluster exists but the API server is unreachable"; return 1; }
+  return 0
+}
+
+# ---------------------------------------------------------------- helm over OCI
+# Helm against public OCI registries, isolated from local credential state.
+#
+# Symptom this avoids: `403: denied` fetching a chart that curl can pull
+# anonymously. --registry-config only redirects helm to a different auth FILE; it
+# does not stop the OCI client resolving credentials through docker credential
+# helpers (credsStore / credHelpers in ~/.docker/config.json, backed by the macOS
+# Keychain). Isolating DOCKER_CONFIG to an empty directory removes helpers from
+# the picture entirely.
+#
+# HELM_USE_HOST_AUTH=1 restores normal credential handling for private charts.
+helm_oci() {
+  if [[ "${HELM_USE_HOST_AUTH:-0}" == "1" ]]; then
+    helm --kube-context "kind-${CLUSTER_NAME}" "$@"
+    return
+  fi
+  local cfg="${STATE_DIR}/helm-anon-registry.json"
+  local dcfg="${STATE_DIR}/anon-docker-config"
+  echo '{"auths":{}}' > "${cfg}"
+  mkdir -p "${dcfg}"; echo '{}' > "${dcfg}/config.json"
+
+  DOCKER_CONFIG="${dcfg}" \
+  HELM_REGISTRY_CONFIG="${cfg}" \
+  helm --kube-context "kind-${CLUSTER_NAME}" --registry-config "${cfg}" "$@"
+}
+
+# ---------------------------------------------------------------- self-check
+# Assert every helper this library is supposed to export actually exists.
+#
+# This exists because of a real incident: an edit truncated lib.sh and removed
+# cluster_exists() among others. Nothing errored usefully -- `if cluster_exists;`
+# with a missing function returns 127, `set -e` does not fire inside an if
+# condition, and down.sh silently took the "no cluster" branch and reported
+# SUCCESS while the cluster was still running. A wrong answer delivered
+# confidently is worse than a crash, so fail loudly at load time instead.
+_lib_selfcheck() {
+  local missing=() fn
+  for fn in load_env detect_runtime runtime_uses_machine ctr kctl need \
+            log warn die ok resolve_host_ip wait_rollout render \
+            publish_ai_gateway helm_chart_install helm_oci \
+            cluster_exists cluster_nodes ensure_cluster_running; do
+    declare -F "${fn}" >/dev/null 2>&1 || missing+=("${fn}")
+  done
+  if (( ${#missing[@]} )); then
+    printf '\033[1;31m[x]\033[0m %s\n' "scripts/lib.sh is incomplete -- missing: ${missing[*]}" >&2
+    printf '    %s\n' "restore it from git; do not trust results from other targets" >&2
+    exit 1
+  fi
+}
+_lib_selfcheck

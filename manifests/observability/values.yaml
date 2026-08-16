@@ -1,0 +1,156 @@
+# kube-prometheus-stack, trimmed to fit a single 9.7Gi kind node.
+#
+# The stack's defaults assume a real cluster and land around 2 GB. Everything
+# below is either a size reduction or a selector fix; nothing here changes what
+# the operator fundamentally is, so the ServiceMonitor/PodMonitor pattern you
+# learn here is the same one used in production.
+#
+# Chart: prometheus-community/kube-prometheus-stack (classic HTTP repo, so it is
+# unaffected by the Helm-4 OCI/ghcr failure that blocks the other charts here).
+
+fullnameOverride: kps
+
+# --- Alertmanager: off -------------------------------------------------------
+# ~50Mi plus a StatefulSet and PVC, to deliver alerts nobody is receiving.
+alertmanager:
+  enabled: false
+
+# --- Operator ---------------------------------------------------------------
+prometheusOperator:
+  resources:
+    requests: { cpu: 25m, memory: 96Mi }
+    limits:   { memory: 256Mi }
+  admissionWebhooks:
+    # The webhook needs a cert job and a patch job on every install. On one node
+    # that is two extra pods and a failure mode (webhook not ready -> CRs
+    # rejected) for validation this lab does not need.
+    enabled: false
+    patch:
+      enabled: false
+  tls:
+    enabled: false
+
+# --- Prometheus -------------------------------------------------------------
+prometheus:
+  prometheusSpec:
+    # THE critical setting. Left at its default (true), the operator only selects
+    # monitors carrying `release: <helm release name>`, and a PodMonitor without
+    # that label is silently ignored -- targets simply never appear, with nothing
+    # logged. Setting these false makes the operator consider every monitor in
+    # the cluster, which is what you want in a lab.
+    podMonitorSelectorNilUsesHelmValues: false
+    serviceMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    probeSelectorNilUsesHelmValues: false
+    scrapeConfigSelectorNilUsesHelmValues: false
+
+    scrapeInterval: 15s
+    evaluationInterval: 30s
+
+    # 6 hours, in memory. No PVC: this is a lab, the data is disposable, and a
+    # PVC on local-path just moves the disk pressure somewhere less visible.
+    retention: 6h
+    retentionSize: 1GB
+
+    resources:
+      requests: { cpu: 100m, memory: 400Mi }
+      limits:   { memory: 1Gi }
+
+    # Drop the high-cardinality kubelet/cadvisor series that dominate memory but
+    # say nothing about inference. Node and pod level metrics survive.
+    walCompression: true
+
+# --- Grafana ----------------------------------------------------------------
+grafana:
+  enabled: true
+  adminPassword: llm-lab
+
+  # Chart 88.3.0 pins grafana/grafana:13.1.3. If Grafana serves "failed to load
+  # its application files" -- its static fallback, recognisable because the
+  # browser makes NO asset requests at all -- pin an older tag here and reinstall.
+  # Check `kubectl -n llm-observability logs deploy/kps-grafana -c grafana` first;
+  # the log names the real reason.
+  # image:
+  #   tag: 11.6.1
+
+  # Sized for Grafana 13, not 11.
+  #
+  # The chart ships grafana/grafana:13.1.3, which runs an embedded apiserver,
+  # unified storage, and builds a Bleve search index IN MEMORY. The original
+  # 50m/128Mi request with a 384Mi cap did not OOM -- it starved. Observed in the
+  # logs: GET / taking 40s, /user/auth-tokens/rotate taking 60s, and SQLite
+  # deadlocking on its own cleanup jobs with SQLITE_BUSY. The browser times out
+  # first and shows Grafana's "failed to load its application files" page, which
+  # looks like a broken install and is really just a slow one.
+  #
+  # The CPU request matters more than the limit here: vLLM requests 2 of the
+  # node's 6 cores, so a 50m pod is scheduled last and throttled hardest.
+  resources:
+    requests: { cpu: 250m, memory: 512Mi }
+    limits:   { memory: 1Gi }
+
+  # Trim Grafana 13 features this lab does not use. Each one is a background
+  # loop competing for the same starved CPU and the same locked SQLite file.
+  grafana.ini:
+    analytics:
+      check_for_updates: false
+      reporting_enabled: false
+    unified_alerting:
+      enabled: false
+    alerting:
+      enabled: false
+
+  persistence:
+    enabled: false
+
+  service:
+    type: NodePort
+    port: 80
+    # kind maps 30090 -> localhost:9090. Grafana takes it rather than Prometheus
+    # because Grafana is the one you actually open in a browser; Prometheus is
+    # reachable via `make prom`.
+    nodePort: 30090
+
+  # The stack's built-in Kubernetes dashboards are useful but numerous, and each
+  # one is a ConfigMap the sidecar parses at boot. Off, so the vLLM dashboard is
+  # the thing you land on.
+  defaultDashboardsEnabled: false
+
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      # Our vLLM dashboard ConfigMap lives in llm-observability; without ALL the
+      # sidecar only watches its own namespace.
+      searchNamespace: ALL
+    datasources:
+      enabled: true
+
+# --- Node/cluster exporters -------------------------------------------------
+# Both are small and both are directly relevant here: node-exporter is how you
+# see the memory pressure that has repeatedly taken this node down, and
+# kube-state-metrics is how you see pods stuck Pending.
+prometheus-node-exporter:
+  resources:
+    requests: { cpu: 10m, memory: 32Mi }
+    limits:   { memory: 64Mi }
+
+kube-state-metrics:
+  resources:
+    requests: { cpu: 10m, memory: 48Mi }
+    limits:   { memory: 128Mi }
+
+# Not applicable on a Linux-only kind node.
+prometheus-windows-exporter:
+  enabled: false
+
+# kind's control plane binds these to 127.0.0.1 inside the node, so the default
+# scrape targets are unreachable and the stack ships permanently-red targets.
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeProxy:
+  enabled: false
+kubeEtcd:
+  enabled: false

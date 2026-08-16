@@ -54,6 +54,26 @@ spec:
         - name: ai-gateway
           port: 8080
 
+    # /ui -> /ui/  (exact match, redirect only)
+    #
+    # Verified in a browser: http://localhost:8080/ui/ renders the LiteLLM login
+    # page correctly, and http://localhost:8080/ui does not load at all. The app
+    # answers the slashless form with its own absolute redirect, and behind this
+    # ingress that redirect does not survive the trip back to the browser.
+    #
+    # Rather than depend on the app getting proxy-awareness right, normalise the
+    # path at the edge. Exact match, so /ui/anything is untouched and falls
+    # through to the catch-all below.
+    - matches:
+        - path: { type: Exact, value: /ui }
+      filters:
+        - type: RequestRedirect
+          requestRedirect:
+            path:
+              type: ReplaceFullPath
+              replaceFullPath: /ui/
+            statusCode: 302
+
     # Everything else: admin UIs, health, metrics, static assets.
     #
     # LiteLLM serves its dashboard at /ui and Bifrost at /, each pulling JS/CSS

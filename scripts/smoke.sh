@@ -36,7 +36,7 @@ active_gateway() {
         -o jsonpath='{.metadata.labels.llm-lab\.io/gateway}' 2>/dev/null || true)"
   if [[ -z "${g}" ]]; then
     if kctl -n llm-serving get httproute inferencepool-direct >/dev/null 2>&1; then
-      g="none"
+      g="ngf-llmd"
     else
       g="${GATEWAY:-unknown} (declared; no ai-gateway Service found)"
     fi

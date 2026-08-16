@@ -27,7 +27,15 @@ help: ## show this help
 
 .PHONY: init
 init: ## create .env from the example
-	@[[ -f .env ]] && echo ".env exists, leaving it alone" || { cp .env.example .env; echo "created .env"; }
+	@if [[ -f .env ]]; then \
+	  echo ".env exists, leaving it alone"; \
+	elif [[ ! -f .env.example ]]; then \
+	  echo "ERROR: .env.example is missing -- restore it from git" >&2; exit 1; \
+	elif cp .env.example .env; then \
+	  echo "created .env from .env.example"; \
+	else \
+	  echo "ERROR: could not create .env" >&2; exit 1; \
+	fi
 
 .PHONY: use-docker use-podman
 use-docker: ## switch runtime to docker (refuses if a cluster would be stranded)
@@ -89,6 +97,26 @@ verify-images: ## confirm every image has a linux/arm64 manifest
 .PHONY: capture
 capture: ## write full diagnostics to diagnostics.log (readable by Claude, no copy/paste)
 	@$(S)/capture.sh
+
+.PHONY: observability
+observability: ## install kube-prometheus-stack + vLLM dashboard (heavy, opt-in)
+	@$(S)/observability.sh
+
+.PHONY: observability-down
+observability-down: ## remove the observability stack
+	@$(S)/observability-down.sh
+
+.PHONY: grafana
+grafana: ## port-forward Grafana to localhost:3000 (works without the NodePort)
+	@echo "Grafana -> http://localhost:3000   login: admin / llm-lab   (ctrl-c to stop)"
+	@kubectl --context kind-$${CLUSTER_NAME:-llm-lab} -n llm-observability \
+	  port-forward svc/kps-grafana 3000:80
+
+.PHONY: prom
+prom: ## port-forward Prometheus to localhost:9091
+	@echo "Prometheus -> http://localhost:9091/targets  (ctrl-c to stop)"
+	@kubectl --context kind-$${CLUSTER_NAME:-llm-lab} -n llm-observability \
+	  port-forward svc/kps-prometheus 9091:9090
 
 .PHONY: ui
 ui: ## open the active gateway's web UI (port-forward)

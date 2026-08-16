@@ -1,3 +1,5 @@
-# mac stuff
-
-.DS_Store
+.env
+.state/
+*.log
+kubeconfig
+diagnostics.log

@@ -30,19 +30,44 @@ service:
   # answer on the same port for the NGF HTTPRoute to be gateway-agnostic.
   port: 8080
 
-# No database. The Postgres subchart alone costs ~300 MB and this lab needs
-# neither key management nor persisted spend tracking.
+# PostgreSQL: required for the admin UI, and NOT VALIDATED on this hardware.
+#
+# STATUS: LITELLM_WITH_DB defaults to false because the true path has never
+# completed successfully here. One attempt on a 9.7Gi node with PROFILE=full took
+# the API server down mid-install. Whether that is node memory exhaustion or the
+# migration job failing against Postgres is still unknown. Treat the true path as
+# an experiment, not a supported configuration, until someone runs it green.
+#
+# This was originally disabled to save ~300 MB, on the reasoning that a lab does
+# not need key management or spend tracking. That reasoning was wrong about what
+# the DB is load-bearing for: LiteLLM's /ui authenticates against Postgres, so
+# without it every login fails with "Authentication Error, Not connected to DB!"
+# while the OpenAI API keeps working perfectly. The result is a gateway that
+# passes every smoke test and has an unusable dashboard.
+#
+# Set LITELLM_WITH_DB=false in .env to trade the UI back for the memory.
 db:
   useExisting: false
-  deployStandalone: false
+  deployStandalone: __LITELLM_WITH_DB__
 
+# Chart.yaml gates the postgresql subchart on `db.deployStandalone`, not on
+# `postgresql.enabled` -- setting the latter alone does nothing.
 postgresql:
-  enabled: false
+  enabled: __LITELLM_WITH_DB__
+  primary:
+    resources:
+      requests: { cpu: 50m, memory: 192Mi }
+      limits:   { memory: 512Mi }
+    persistence:
+      size: 2Gi
+
 redis:
   enabled: false
 
+# Creates the schema. Without it the pod starts, connects, and then fails every
+# query against tables that do not exist.
 migrationJob:
-  enabled: false
+  enabled: __LITELLM_WITH_DB__
 
 masterkey: sk-llm-lab-local
 
