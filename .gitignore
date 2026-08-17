@@ -3,3 +3,4 @@
 *.log
 kubeconfig
 diagnostics.log
+.DS_Store
